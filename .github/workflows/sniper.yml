@@ -2,8 +2,8 @@ name: SHEINVERSE Sniper 24/7
 
 on:
   schedule:
-    - cron: '*/3 * * * *'  # Runs every 3 minutes
-  workflow_dispatch:        # Manual trigger
+    - cron: '*/3 * * * *'
+  workflow_dispatch:
 
 jobs:
   snipe:
@@ -18,13 +18,12 @@ jobs:
         with:
           name: seen-products
           path: ./
-        continue-on-error: true  # This allows first run to continue even if no artifact exists
+        continue-on-error: true
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # Removed cache option to avoid lock file requirement
       
       - name: Install Chrome
         run: |
@@ -33,12 +32,24 @@ jobs:
       
       - name: Install dependencies
         run: |
-          npm init -y  # Creates package.json if missing
           npm install puppeteer@latest
           npm install node-fetch@3.3.0
       
       - name: Run sniper
         run: node sniper.js
+      
+      - name: Upload debug files
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files
+          path: |
+            debug-screenshot.jpg
+            debug-page.html
+            debug-info.txt
+            debug-error.txt
+            seen_products.json
+          if-no-files-found: warn
+          retention-days: 7
       
       - name: Save seen products
         uses: actions/upload-artifact@v4
