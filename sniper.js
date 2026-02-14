@@ -75,103 +75,136 @@ async function runSniper() {
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage'
+                '--disable-dev-shm-usage',
+                '--window-size=1920,1080'
             ]
         });
 
         const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
         
-        console.log('📱 Loading SHEINVERSE page...');
+        // Set desktop viewport
+        await page.setViewport({ width: 1920, height: 1080 });
+        
+        // Use desktop user agent
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        console.log('📱 Loading SHEINVERSE page (desktop mode)...');
+        
+        // Go to page and wait for content
         await page.goto('https://www.sheinindia.in/c/sverse-5939-37961', {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
         
-        console.log('✅ Page loaded, waiting for content...');
+        console.log('✅ Page loaded, waiting for product grid...');
         
-        // Wait for any product-related elements to load
+        // Wait for desktop-specific selectors
         await page.waitForFunction(() => {
-            return document.querySelectorAll('img').length > 10;
+            // Common desktop product grid selectors
+            const selectors = [
+                '.S-product-item',
+                '.product-card',
+                '.c-product-item',
+                '[data-spm="product"]',
+                '.product-list-item',
+                '.goods-item'
+            ];
+            
+            for (const selector of selectors) {
+                if (document.querySelector(selector)) return true;
+            }
+            return document.querySelectorAll('img').length > 20;
         }, { timeout: 30000 });
         
-        console.log('📜 Scrolling to load products...');
+        console.log('📜 Scrolling to load more products...');
         
-        // Scroll multiple times
-        for (let i = 0; i < 10; i++) {
-            await page.evaluate(() => window.scrollBy(0, 1000));
-            console.log(`   Scroll ${i + 1}/10`);
-            await new Promise(r => setTimeout(r, 1500));
+        // Scroll multiple times for desktop infinite scroll
+        for (let i = 0; i < 15; i++) {
+            await page.evaluate(() => {
+                window.scrollBy(0, 500);
+            });
+            console.log(`   Scroll ${i + 1}/15`);
+            await new Promise(r => setTimeout(r, 1000));
         }
         
-        // Scroll back to top
-        await page.evaluate(() => window.scrollTo(0, 0));
-        await new Promise(r => setTimeout(r, 2000));
+        // Wait for any lazy-loaded images
+        await new Promise(r => setTimeout(r, 3000));
         
-        console.log('🔍 Extracting products with multiple methods...');
+        console.log('🔍 Extracting products...');
         
-        // Method 1: Try multiple selectors
+        // Extract products using desktop-specific selectors
         const products = await page.evaluate(() => {
             const items = [];
             
-            // Try different possible product selectors
-            const selectors = [
-                'a[href*="/p-"]',
-                'a[href*="-p-"]',
-                '.product-card a',
-                '.item a',
-                '[class*="product"] a[href]',
-                '[class*="item"] a[href]'
+            // Try multiple desktop selectors
+            const productSelectors = [
+                '.S-product-item',
+                '.product-card',
+                '.c-product-item',
+                '[data-spm="product"]',
+                '.product-list-item',
+                '.goods-item',
+                '.product-item'
             ];
             
-            let links = [];
-            for (const selector of selectors) {
+            let productElements = [];
+            for (const selector of productSelectors) {
                 const found = document.querySelectorAll(selector);
                 if (found.length > 0) {
-                    console.log(`Found ${found.length} links with selector: ${selector}`);
-                    links = found;
+                    console.log(`Found ${found.length} products with selector: ${selector}`);
+                    productElements = found;
                     break;
                 }
             }
             
-            if (links.length === 0) {
-                // Last resort: look for any link with image
-                links = document.querySelectorAll('a');
+            // If no specific product elements found, look for links with product patterns
+            if (productElements.length === 0) {
+                const links = document.querySelectorAll('a[href*="/p-"], a[href*="-p-"]');
+                links.forEach(link => {
+                    const container = link.closest('div[class*="product"], div[class*="item"]') || link.parentElement;
+                    if (container) productElements.push(container);
+                });
             }
             
-            links.forEach((link) => {
+            productElements.forEach((element, index) => {
                 try {
-                    const href = link.getAttribute('href');
-                    if (!href || (!href.includes('/p-') && !href.includes('-p-'))) return;
+                    // Find product link
+                    const link = element.querySelector('a[href*="/p-"], a[href*="-p-"]');
+                    if (!link) return;
                     
+                    const href = link.getAttribute('href');
                     const id = href.match(/-p-(\d+)/)?.[1] || href;
                     
-                    // Try to find the product container
-                    const container = link.closest('div[class*="product"], div[class*="item"], li[class*="product"], div') || link.parentElement;
-                    if (!container) return;
-                    
                     // Find image
-                    const imgEl = container.querySelector('img') || link.querySelector('img');
-                    if (!imgEl) return;
+                    const img = element.querySelector('img');
+                    if (!img) return;
                     
-                    // Get product name
-                    let name = imgEl.getAttribute('alt') || 
-                              container.innerText.split('\n')[0] || 
+                    // Get name
+                    let name = img.getAttribute('alt') || 
+                              element.innerText.split('\n')[0] || 
                               "Shein Product";
                     name = name.replace(/Shop\s*|\s*\|\s*Shein India/i, '').trim();
-                    if (name.length > 50) name = name.substring(0, 47) + '...';
+                    if (name.length > 60) name = name.substring(0, 57) + '...';
                     
-                    // Extract price
+                    // Get price - desktop often has different price structure
                     let price = "Price N/A";
-                    const priceMatch = container.innerText.match(/[₹]\s*([0-9,]+)/);
-                    if (priceMatch) price = `₹${priceMatch[1]}`;
+                    const priceElement = element.querySelector('.price, [class*="price"], .S-price, .product-price');
+                    if (priceElement) {
+                        const priceText = priceElement.innerText;
+                        const match = priceText.match(/[₹]\s*([0-9,]+)/);
+                        if (match) price = `₹${match[1]}`;
+                    } else {
+                        const textMatch = element.innerText.match(/[₹]\s*([0-9,]+)/);
+                        if (textMatch) price = `₹${textMatch[1]}`;
+                    }
                     
                     // Get image URL
-                    let imageUrl = imgEl.getAttribute('src') || imgEl.getAttribute('data-src');
+                    let imageUrl = img.getAttribute('src') || img.getAttribute('data-src') || img.getAttribute('data-original');
                     if (imageUrl) {
                         if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
                         else if (imageUrl.startsWith('/')) imageUrl = 'https://www.sheinindia.in' + imageUrl;
-                        imageUrl = imageUrl.replace(/_\d+x\d+/, '_500x750');
+                        // Clean up URL for better quality
+                        imageUrl = imageUrl.replace(/_\d+x\d+/, '_1000x1500');
                     }
                     
                     // Build full URL
@@ -182,7 +215,8 @@ async function runSniper() {
                         name,
                         price,
                         url,
-                        imageUrl
+                        imageUrl,
+                        index
                     });
                 } catch (e) {
                     // Skip errors
@@ -195,12 +229,15 @@ async function runSniper() {
         console.log(`📦 Found ${products.length} products total`);
         
         if (products.length === 0) {
-            console.log('⚠️ No products found! Taking screenshot to debug...');
-            await page.screenshot({ path: 'debug-screenshot.jpg', fullPage: true });
+            console.log('⚠️ No products found! Taking screenshot...');
+            const screenshot = await page.screenshot({ fullPage: true, path: 'debug-screenshot.jpg' });
+            fs.writeFileSync('debug-screenshot.jpg', screenshot);
+            console.log('✅ Screenshot saved as debug-screenshot.jpg');
             
-            // Upload screenshot as artifact
-            fs.writeFileSync('debug-screenshot.jpg', await page.screenshot({ fullPage: true }));
-            console.log('✅ Screenshot saved for debugging');
+            // Also save page HTML for debugging
+            const html = await page.content();
+            fs.writeFileSync('debug-page.html', html);
+            console.log('✅ Page HTML saved');
             return;
         }
         
@@ -234,6 +271,7 @@ async function runSniper() {
         
     } catch (error) {
         console.error('❌ Error:', error.message);
+        console.error(error.stack);
     } finally {
         if (browser) await browser.close();
         console.log('🏁 Run completed at', new Date().toLocaleString());
