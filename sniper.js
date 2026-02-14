@@ -1,332 +1,202 @@
 const puppeteer = require('puppeteer');
+const fetch = require('node-fetch');
 const fs = require('fs');
+const path = require('path');
 
-const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
-const TELEGRAM_CHAT_ID = "-1003320038050";
-const SEEN_FILE = 'seen_products.json';
-
-// Your Webshare proxies
-const WEBSHARE_PROXIES = [
-    '31.59.20.176:6754:vtlrnieh:3cl0gw8tlcsy',
-    '23.95.150.145:6114:vtlrnieh:3cl0gw8tlcsy',
-    '198.23.239.134:6540:vtlrnieh:3cl0gw8tlcsy',
-    '45.38.107.97:6014:vtlrnieh:3cl0gw8tlcsy',
-    '107.172.163.27:6543:vtlrnieh:3cl0gw8tlcsy',
-    '198.105.121.200:6462:vtlrnieh:3cl0gw8tlcsy',
-    '64.137.96.74:6641:vtlrnieh:3cl0gw8tlcsy',
-    '216.10.27.159:6837:vtlrnieh:3cl0gw8tlcsy',
-    '23.26.71.145:5628:vtlrnieh:3cl0gw8tlcsy',
-    '23.229.19.94:8689:vtlrnieh:3cl0gw8tlcsy'
-];
-
-// Men's SHEINVERSE URL
+// --- CONFIGURATION ---
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const TARGET_URL = 'https://www.sheinindia.in/c/sverse-5939-37961?query=%3Arelevance%3Agenderfilter%3AMen&gridColumns=2&segmentIds=23%2C17%2C18%2C9&customerType=Existing&includeUnratedProducts=false';
 
-function parseProxy(proxyString) {
-    const [ip, port, username, password] = proxyString.split(':');
-    return { ip, port, username, password };
-}
+const PROXIES = [
+    '31.59.20.176:6754', '185.193.159.136:7417', '185.193.157.142:6971',
+    '31.59.13.141:5906', '31.59.14.39:5348', '31.59.50.117:6383',
+    '185.193.157.38:8150', '185.193.159.123:5131', '31.59.13.155:5430',
+    '31.59.13.197:5620'
+];
 
-function formatProxyForPuppeteer(proxy) {
-    return `http://${proxy.ip}:${proxy.port}`;
-}
+const SEEN_FILE = 'seen_products.json';
+let seenProducts = new Set();
 
-let currentProxyIndex = 0;
-function getNextProxy() {
-    const proxyString = WEBSHARE_PROXIES[currentProxyIndex];
-    currentProxyIndex = (currentProxyIndex + 1) % WEBSHARE_PROXIES.length;
-    return parseProxy(proxyString);
-}
-
-function loadSeenProducts() {
+if (fs.existsSync(SEEN_FILE)) {
     try {
-        if (fs.existsSync(SEEN_FILE)) {
-            const data = fs.readFileSync(SEEN_FILE, 'utf8');
-            const seen = JSON.parse(data);
-            console.log(`📂 Loaded ${Object.keys(seen).length} previously seen products`);
-            return seen;
-        }
+        const data = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
+        seenProducts = new Set(data);
     } catch (e) {
-        console.log('❌ Error loading seen products:', e.message);
+        console.log("⚠️ Error loading seen products, starting fresh.");
     }
-    console.log('📂 No seen_products.json file found - first run');
-    return {};
 }
 
-function saveSeenProducts(seen) {
+async function sendTelegram(message, imageUrl = null) {
+    if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return;
     try {
-        fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
-        console.log(`✅ Saved ${Object.keys(seen).length} products to seen_products.json`);
+        const endpoint = imageUrl ? 'sendPhoto' : 'sendMessage';
+        const body = imageUrl ? { chat_id: TELEGRAM_CHAT_ID, photo: imageUrl, caption: message, parse_mode: 'HTML' } : { chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: 'HTML' };
+        
+        await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
     } catch (e) {
-        console.log('❌ Error saving seen products:', e.message);
+        console.error("❌ Telegram Error:", e.message);
     }
 }
 
-function getSafeFilename(productId) {
-    // Extract just the product code (the part after /p/)
-    const match = productId.match(/\/p\/([^\/]+)/);
-    if (match && match[1]) {
-        return match[1]; // Returns something like "443326049_darkblue"
-    }
-    // Fallback: remove special characters
-    return productId.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 50);
-}
-
-async function checkProductStockWithDebug(page, product, index) {
-    try {
-        const safeId = getSafeFilename(product.id);
-        console.log(`\n   🔍 [Product ${index + 1}] Checking: ${product.name.substring(0, 50)}...`);
-        console.log(`      URL: ${product.url}`);
-        console.log(`      Product Code: ${safeId}`);
-        
-        await page.goto(product.url, {
-            waitUntil: 'networkidle2',
-            timeout: 60000
-        });
-        
-        console.log(`      ⏳ Waiting 5 seconds for page to render...`);
-        await new Promise(r => setTimeout(r, 5000));
-        
-        // Take screenshot - use product code for filename
-        const screenshotPath = `product_${index+1}_${safeId}.jpg`;
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        console.log(`      📸 Saved screenshot: ${screenshotPath}`);
-        
-        // Save HTML - use product code for filename
-        const htmlPath = `product_${index+1}_${safeId}.html`;
-        const html = await page.content();
-        fs.writeFileSync(htmlPath, html);
-        console.log(`      📄 Saved HTML: ${htmlPath}`);
-        
-        // Check stock status
-        const stockStatus = await page.evaluate(() => {
-            const pageText = document.body.innerText?.toLowerCase() || '';
-            
-            // Look for "Add to Bag" button
-            const buttons = Array.from(document.querySelectorAll('button'));
-            let addButton = null;
-            for (const btn of buttons) {
-                const text = (btn.innerText || '').toLowerCase();
-                if (text.includes('add to bag') || text.includes('buy now')) {
-                    addButton = btn;
-                    break;
-                }
-            }
-            
-            const hasAddButton = !!addButton;
-            const isButtonDisabled = addButton ? 
-                (addButton.disabled || addButton.hasAttribute('disabled')) : true;
-            
-            // Check for out of stock text
-            const outOfStockPhrases = ['out of stock', 'sold out', 'coming soon', 'unavailable'];
-            const hasOutOfStock = outOfStockPhrases.some(p => pageText.includes(p));
-            
-            // Check for "In Stock" text
-            const hasInStock = pageText.includes('in stock') || pageText.includes('available');
-            
-            // Make determination
-            let inStock = false;
-            let reason = '';
-            
-            if (hasAddButton && !isButtonDisabled) {
-                inStock = true;
-                reason = 'Enabled Add to Bag button';
-            } else if (hasInStock) {
-                inStock = true;
-                reason = '"In Stock" text found';
-            } else if (hasOutOfStock) {
-                inStock = false;
-                reason = 'Out of stock text found';
-            } else {
-                inStock = false;
-                reason = 'No clear stock indicators';
-            }
-            
-            return { inStock, reason };
-        });
-        
-        console.log(`      📊 Result: ${stockStatus.inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
-        console.log(`      📝 Reason: ${stockStatus.reason}`);
-        
-        return stockStatus.inStock;
-        
-    } catch (error) {
-        console.log(`      ❌ Error checking stock: ${error.message}`);
-        return false;
-    }
-}
-
-async function scrapeWithProxy(proxy) {
-    console.log(`🔄 Trying proxy: ${proxy.ip}:${proxy.port}`);
+async function checkStock(browser, product, index) {
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
     
-    let browser;
     try {
-        const proxyUrl = formatProxyForPuppeteer(proxy);
-        
-        browser = await puppeteer.launch({
-            headless: true,
-            executablePath: '/usr/bin/google-chrome-stable',
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-                `--proxy-server=${proxyUrl}`
-            ]
+        console.log(`   ⚡ Checking: ${product.name.substring(0, 30)}...`);
+        await page.goto(product.url, { waitUntil: 'networkidle2', timeout: 45000 });
+
+        // DEBUG: Capture for the first 5 products
+        if (index < 5) {
+            const safeName = product.name.replace(/[^a-z0-9]/gi, '_').toLowerCase().substring(0, 20);
+            const htmlPath = `debug_${index}_${safeName}.html`;
+            const screenPath = `debug_${index}_${safeName}.png`;
+            
+            const html = await page.content();
+            fs.writeFileSync(htmlPath, html);
+            await page.screenshot({ path: screenPath, fullPage: false });
+            console.log(`      📸 Debug saved: ${htmlPath}`);
+        }
+
+        // IMPROVED DETECTION LOGIC
+        // We look for common SHEIN "Add to Bag" patterns or the absence of "Sold Out"
+        const stockData = await page.evaluate(() => {
+            const html = document.body.innerHTML.toLowerCase();
+            const btn = document.querySelector('.she-btn-black, .add-to-bag, [id*="add-to-bag"]');
+            const isSoldOutText = html.includes('sold out') || html.includes('out of stock');
+            const hasAddButton = !!btn && !btn.disabled && !btn.innerText.toLowerCase().includes('sold out');
+            
+            return {
+                inStock: hasAddButton || (html.includes('add to bag') && !isSoldOutText),
+                btnText: btn ? btn.innerText.trim() : 'NOT_FOUND'
+            };
         });
 
-        const page = await browser.newPage();
-        
-        await page.authenticate({
-            username: proxy.username,
-            password: proxy.password
-        });
-        
-        await page.setViewport({ width: 1920, height: 1080 });
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        console.log('📱 Loading Men\'s SHEINVERSE page...');
-        
-        await page.goto(TARGET_URL, {
-            waitUntil: 'networkidle2',
-            timeout: 60000
-        });
-        
-        await page.waitForSelector('.item.rilrtl-products-list__item', { timeout: 30000 });
-        
-        console.log('📜 Scrolling to load all products...');
-        
-        for (let i = 0; i < 15; i++) {
-            await page.evaluate(() => window.scrollBy(0, 800));
-            console.log(`   Scroll ${i + 1}/15`);
-            await new Promise(r => setTimeout(r, 1500));
-        }
-        
-        await new Promise(r => setTimeout(r, 3000));
-        
-        console.log('🔍 Extracting products from listing...');
-        
-        const products = await page.evaluate(() => {
-            const items = [];
-            const productElements = document.querySelectorAll('.item.rilrtl-products-list__item');
-            
-            productElements.forEach((element) => {
-                try {
-                    const link = element.querySelector('a.rilrtl-products-list__link');
-                    if (!link) return;
-                    
-                    const href = link.getAttribute('href');
-                    const id = href?.match(/-p-(\d+)/)?.[1] || href;
-                    
-                    const img = element.querySelector('img.rilrtl-lazy-img');
-                    if (!img) return;
-                    
-                    let name = img.getAttribute('alt') || "Shein Product";
-                    name = name.replace(/Shein\s*/i, '').trim();
-                    
-                    let price = "Price N/A";
-                    const priceElement = element.querySelector('.price strong, .offer-pricess');
-                    if (priceElement) {
-                        price = priceElement.innerText.trim();
-                        if (!price.includes('₹')) price = '₹' + price;
-                    } else {
-                        const text = element.innerText;
-                        const match = text.match(/₹\s*([0-9,]+)/);
-                        if (match) price = `₹${match[1]}`;
-                    }
-                    
-                    let imageUrl = img.getAttribute('src') || img.getAttribute('data-src');
-                    if (imageUrl) {
-                        if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
-                        else if (imageUrl.startsWith('/')) imageUrl = 'https://www.sheinindia.in' + imageUrl;
-                        imageUrl = imageUrl.replace(/-\d+Wx\d+H-/, '-1000x1500-');
-                    }
-                    
-                    const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
-                    
-                    items.push({
-                        id,
-                        name,
-                        price,
-                        url,
-                        imageUrl
-                    });
-                } catch (e) {
-                    // Skip errors
-                }
-            });
-            
-            return items;
-        });
-        
-        console.log(`📦 Found ${products.length} total products on listing`);
-        
-        if (products.length > 0) {
-            const seen = loadSeenProducts();
-            const newProducts = products.filter(p => p.id && !seen[p.id]);
-            console.log(`🎯 New products to check: ${newProducts.length}`);
-            
-            if (newProducts.length > 0) {
-                console.log(`\n🔬 Checking ONLY FIRST 5 products for debugging...`);
-                console.log(`📸 Will save screenshots & HTML with product codes\n`);
-                
-                const productsToCheck = newProducts.slice(0, 5);
-                
-                for (let i = 0; i < productsToCheck.length; i++) {
-                    await checkProductStockWithDebug(page, productsToCheck[i], i);
-                }
-                
-                console.log(`\n✅ Debug files saved for first 5 products`);
-                console.log(`📁 Check artifacts for files named product_1_*.jpg, product_1_*.html, etc.`);
-                
-            } else {
-                console.log('❌ No new products found to check');
-            }
-        }
-        
-        return true;
-        
-    } catch (error) {
-        console.log(`❌ Proxy failed: ${error.message}`);
+        return stockData.inStock;
+    } catch (e) {
+        console.error(`      ❌ Error checking ${product.url}: ${e.message}`);
         return false;
     } finally {
-        if (browser) await browser.close();
+        await page.close();
     }
 }
 
-async function runSniper() {
-    console.log('🚀 Starting DEBUG Sniper - Will check ONLY first 5 products', new Date().toLocaleString());
-    console.log(`📡 Target URL: ${TARGET_URL}`);
-    console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
-    console.log(`📸 Will save screenshots & HTML for first 5 products ONLY`);
-    console.log(`📁 Files will be named with product codes (e.g., product_1_443326049_darkblue.jpg)\n`);
-    
-    for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
-        const proxy = getNextProxy();
-        console.log(`\n📡 Attempt ${attempt + 1}/${WEBSHARE_PROXIES.length}`);
+(async () => {
+    console.log(`🚀 Starting SHEINVERSE Sniper... ${new Date().toLocaleString()}`);
+    let browser;
+    let success = false;
+
+    for (let i = 0; i < PROXIES.length && !success; i++) {
+        const proxy = PROXIES[i];
+        console.log(`🔄 Trying proxy: ${proxy}`);
         
-        const success = await scrapeWithProxy(proxy);
-        if (success) {
-            console.log('✅ Debug run completed!');
-            console.log('\n📁 Artifacts should contain:');
-            console.log('   - product_1_*.jpg');
-            console.log('   - product_1_*.html');
-            console.log('   - product_2_*.jpg');
-            console.log('   - product_2_*.html');
-            console.log('   - product_3_*.jpg');
-            console.log('   - product_3_*.html');
-            console.log('   - product_4_*.jpg');
-            console.log('   - product_4_*.html');
-            console.log('   - product_5_*.jpg');
-            console.log('   - product_5_*.html');
-            return;
+        try {
+            browser = await puppeteer.launch({
+                headless: "new",
+                args: [`--proxy-server=http://${proxy}`, '--no-sandbox', '--disable-setuid-sandbox']
+            });
+
+            const page = await browser.newPage();
+            await page.setViewport({ width: 1280, height: 800 });
+            await page.goto(TARGET_URL, { waitUntil: 'networkidle2', timeout: 60000 });
+
+            // Scroll to load products
+            for (let s = 1; s <= 5; s++) {
+                await page.evaluate(() => window.scrollBy(0, 800));
+                await new Promise(r => setTimeout(r, 1000));
+            }
+
+            const products = await page.evaluate(() => {
+                return Array.from(document.querySelectorAll('.S-product-item')).map(el => ({
+                    name: el.querySelector('.S-product-item__name-link')?.innerText.trim(),
+                    url: el.querySelector('.S-product-item__name-link')?.href,
+                    price: el.querySelector('.S-product-item__price')?.innerText.trim(),
+                    image: el.querySelector('.S-product-item__img-main')?.src,
+                    id: el.getAttribute('data-id') || el.querySelector('.S-product-item__name-link')?.href.split('/').pop()
+                })).filter(p => p.name && p.url);
+            });
+
+            console.log(`📦 Found ${products.length} products.`);
+            
+            const newProducts = products.filter(p => !seenProducts.has(p.id));
+            console.log(`🎯 New products to check: ${newProducts.length}`);
+
+            // Batch check stock
+            for (let j = 0; j < newProducts.length; j++) {
+                const isAvailable = await checkStock(browser, newProducts[j], j);
+                
+                if (isAvailable) {
+                    console.log(`✅ IN STOCK: ${newProducts[j].name}`);
+                    await sendTelegram(`🔥 <b>IN STOCK!</b>\n\n${newProducts[j].name}\nPrice: ${newProducts[j].price}\n\n<a href="${newProducts[j].url}">Shop Now</a>`, newProducts[j].image);
+                }
+                
+                seenProducts.add(newProducts[j].id);
+                // Save progress
+                fs.writeFileSync(SEEN_FILE, JSON.stringify([...seenProducts]));
+            }
+
+            success = true;
+        } catch (e) {
+            console.error(`❌ Proxy ${proxy} failed: ${e.message}`);
+        } finally {
+            if (browser) await browser.close();
         }
-        
-        console.log('⏳ Waiting 5 seconds before next proxy...');
-        await new Promise(r => setTimeout(r, 5000));
     }
-    
-    console.log('❌ All proxies failed');
+})();        const products = await page.evaluate(() => {
+            return Array.from(document.querySelectorAll('.product-list__item, .S-product-item')).map(el => ({
+                name: el.querySelector('.name, .S-product-item__name')?.innerText?.trim(),
+                price: el.querySelector('.price, .S-product-item__price')?.innerText?.trim(),
+                url: el.querySelector('a')?.href,
+                image: el.querySelector('img')?.src
+            })).filter(p => p.name && p.url);
+        });
+
+        console.log(`📦 Found ${products.length} products on listing.`);
+
+        let debugCount = 0;
+        for (const product of products.slice(0, 15)) { // Check top 15
+            if (seenProducts.includes(product.url)) continue;
+
+            console.log(`🔍 Checking Stock: ${product.name}`);
+            await page.goto(product.url, { waitUntil: 'networkidle2' });
+            
+            // Save debug info for the first 5 new products found
+            if (debugCount < 5) {
+                await saveDebugData(page, debugCount + 1, product.name);
+                debugCount++;
+            }
+
+            const stockInfo = await page.evaluate(() => {
+                const btn = document.querySelector('.she-btn-black, .add-to-bag, .product-intro__add-btn');
+                const isOutOfStock = document.body.innerText.includes('OUT OF STOCK') || 
+                                   document.body.innerText.includes('Sold Out') ||
+                                   (btn && btn.innerText.includes('OUT OF STOCK'));
+                return {
+                    inStock: !!btn && !btn.disabled && !isOutOfStock,
+                    btnText: btn ? btn.innerText : 'NOT_FOUND'
+                };
+            });
+
+            if (stockInfo.inStock) {
+                await sendTelegram(`🎯 <b>IN STOCK!</b>\n\n${product.name}\nPrice: ${product.price}\n<a href="${product.url}">Buy Now</a>`, product.image);
+                seenProducts.push(product.url);
+            } else {
+                console.log(`❌ Still OOS (Btn: ${stockInfo.btnText})`);
+            }
+        }
+
+        fs.writeFileSync(SEEN_PRODUCTS_FILE, JSON.stringify(seenProducts.slice(-200)));
+    } catch (err) {
+        console.error("❌ Run Error:", err.message);
+    } finally {
+        await browser.close();
+        console.log("🏁 Cycle Complete.");
+    }
 }
 
-runSniper();
+run();
