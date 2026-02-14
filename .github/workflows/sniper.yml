@@ -1,0 +1,42 @@
+name: SHEINVERSE Sniper 24/7
+
+on:
+  schedule:
+    - cron: '*/3 * * * *'  # Runs every 3 minutes
+  workflow_dispatch:        # Manual trigger
+
+jobs:
+  snipe:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Download previous seen products
+        uses: actions/download-artifact@v3
+        with:
+          name: seen-products
+          path: ./
+        continue-on-error: true
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: |
+          npm install
+          npx puppeteer browsers install chrome
+      
+      - name: Run sniper
+        run: node sniper.js
+      
+      - name: Save seen products
+        uses: actions/upload-artifact@v3
+        with:
+          name: seen-products
+          path: seen_products.json
+          retention-days: 7
+          if-no-files-found: ignore
