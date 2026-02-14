@@ -45,29 +45,4 @@ jobs:
           name: seen-products
           path: seen_products.json
           retention-days: 7
-          if-no-files-found: ignore          npm install node-fetch@3.3.0
-      
-      - name: Run sniper
-        run: node sniper.js
-      
-      - name: Save seen products
-        uses: actions/upload-artifact@v4
-        with:
-          name: seen-products
-          path: seen_products.json
-          retention-days: 7
-          if-no-files-found: ignore      - name: Install Node dependencies
-        run: |
-          npm install
-          npm install puppeteer node-fetch@3.3.0
-      
-      - name: Run sniper
-        run: node sniper.js
-      
-      - name: Save seen products
-        uses: actions/upload-artifact@v4
-        with:
-          name: seen-products
-          path: seen_products.json
-          retention-days: 7
           if-no-files-found: ignore
