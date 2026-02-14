@@ -5,7 +5,7 @@ const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Your Webshare proxies from the file
+// Your Webshare proxies in the EXACT format that worked
 const WEBSHARE_PROXIES = [
     'http://vtlrnieh:3cl0gw8tlcsy@31.59.20.176:6754',
     'http://vtlrnieh:3cl0gw8tlcsy@23.95.150.145:6114',
@@ -19,7 +19,7 @@ const WEBSHARE_PROXIES = [
     'http://vtlrnieh:3cl0gw8tlcsy@23.229.19.94:8689'
 ];
 
-// Rotate through proxies
+// Simple rotation - exactly like before
 let currentProxyIndex = 0;
 function getNextProxy() {
     const proxy = WEBSHARE_PROXIES[currentProxyIndex];
@@ -60,7 +60,7 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
-            console.log(`✅ Alert sent with image: ${product.name.substring(0, 30)}...`);
+            console.log(`✅ Alert sent with image`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -71,15 +71,19 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
-            console.log(`✅ Alert sent: ${product.name.substring(0, 30)}...`);
+            console.log(`✅ Alert sent`);
         }
     } catch (error) {
         console.error('❌ Telegram failed:', error.message);
     }
 }
 
-async function scrapeWithProxy(proxy) {
-    console.log(`🔄 Trying proxy: ${proxy.substring(0, 30)}...`);
+async function runSniper() {
+    console.log('🚀 Starting SHEINVERSE Sniper...', new Date().toLocaleString());
+    
+    // Try first proxy (the one that worked before)
+    const proxy = WEBSHARE_PROXIES[0]; // Start with first proxy
+    console.log(`📡 Using proxy: ${proxy.substring(0, 30)}...`);
     
     let browser;
     try {
@@ -90,24 +94,12 @@ async function scrapeWithProxy(proxy) {
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
                 `--proxy-server=${proxy}`
             ]
         });
 
         const page = await browser.newPage();
-        
-        // Set realistic viewport
         await page.setViewport({ width: 1920, height: 1080 });
-        
-        // Random user agent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        // Authenticate with proxy
-        await page.authenticate({
-            username: 'vtlrnieh',
-            password: '3cl0gw8tlcsy'
-        });
         
         console.log('📱 Loading SHEINVERSE page...');
         
@@ -116,28 +108,25 @@ async function scrapeWithProxy(proxy) {
             timeout: 60000
         });
         
-        console.log('✅ Page loaded, waiting for data...');
+        console.log('✅ Page loaded');
         
-        // Wait for the page to fully render
+        // Wait for content
         await new Promise(r => setTimeout(r, 5000));
         
-        // Extract products from the preloaded state (MOST RELIABLE METHOD)
+        // Extract products from preloaded state (same as your working version)
         const products = await page.evaluate(() => {
             const items = [];
             
-            // Check if preloaded state exists
             if (window.__PRELOADED_STATE__ && 
                 window.__PRELOADED_STATE__.grid && 
                 window.__PRELOADED_STATE__.grid.entities) {
                 
                 const entities = window.__PRELOADED_STATE__.grid.entities;
                 
-                // Loop through all product entities
                 Object.keys(entities).forEach(key => {
                     try {
                         const product = entities[key];
                         if (product && product.name && product.url) {
-                            // Get price (either offer price or original price)
                             let price = 'Price N/A';
                             if (product.offerPrice && product.offerPrice.displayformattedValue) {
                                 price = product.offerPrice.displayformattedValue;
@@ -145,7 +134,6 @@ async function scrapeWithProxy(proxy) {
                                 price = product.price.displayformattedValue;
                             }
                             
-                            // Get image URL
                             let imageUrl = '';
                             if (product.images && product.images.length > 0) {
                                 imageUrl = product.images[0].url;
@@ -154,12 +142,7 @@ async function scrapeWithProxy(proxy) {
                                 }
                             }
                             
-                            // Extract ID from URL
-                            const id = product.url.split('-p-')[1]?.split('_')[0] || 
-                                      product.url.split('/p/')[1] || 
-                                      key;
-                            
-                            // Build full URL
+                            const id = product.url.split('-p-')[1]?.split('_')[0] || key;
                             const url = product.url.startsWith('http') ? 
                                         product.url : 
                                         `https://www.sheinindia.in${product.url}`;
@@ -172,60 +155,7 @@ async function scrapeWithProxy(proxy) {
                                 imageUrl: imageUrl
                             });
                         }
-                    } catch (e) {
-                        // Skip errors
-                    }
-                });
-            }
-            
-            // If no products from preloaded state, try extracting from HTML
-            if (items.length === 0) {
-                // Look for product links
-                const links = document.querySelectorAll('a[href*="/p-"], a[href*="-p-"]');
-                
-                links.forEach(link => {
-                    try {
-                        const href = link.getAttribute('href');
-                        const id = href.match(/-p-(\d+)/)?.[1] || href;
-                        
-                        // Try to find product container
-                        const container = link.closest('.item, .rilrtl-products-list__item, [class*="product"]');
-                        if (!container) return;
-                        
-                        const img = container.querySelector('img');
-                        if (!img) return;
-                        
-                        const name = img.getAttribute('alt') || 'Shein Product';
-                        
-                        // Find price
-                        let price = 'Price N/A';
-                        const priceEl = container.querySelector('.price, [class*="price"]');
-                        if (priceEl) {
-                            price = priceEl.innerText;
-                        } else {
-                            const match = container.innerText.match(/[₹]\s*([0-9,]+)/);
-                            if (match) price = `₹${match[1]}`;
-                        }
-                        
-                        // Get image URL
-                        let imageUrl = img.getAttribute('src') || img.getAttribute('data-src');
-                        if (imageUrl && imageUrl.startsWith('//')) {
-                            imageUrl = 'https:' + imageUrl;
-                        }
-                        
-                        // Build full URL
-                        const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
-                        
-                        items.push({
-                            id,
-                            name: name.substring(0, 50),
-                            price,
-                            url,
-                            imageUrl
-                        });
-                    } catch (e) {
-                        // Skip errors
-                    }
+                    } catch (e) {}
                 });
             }
             
@@ -234,73 +164,48 @@ async function scrapeWithProxy(proxy) {
         
         console.log(`📦 Found ${products.length} products`);
         
-        if (products.length === 0) {
-            console.log('⚠️ No products found! Taking screenshot...');
+        if (products.length > 0) {
+            const seen = loadSeenProducts();
+            const newProducts = products.filter(p => p.id && !seen[p.id]);
+            
+            console.log(`🎯 New products: ${newProducts.length}`);
+            
+            if (newProducts.length > 0) {
+                for (const product of newProducts.slice(0, 5)) {
+                    await sendTelegramAlert(product);
+                    seen[product.id] = Date.now();
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+                saveSeenProducts(seen);
+            }
+            
+            // Take screenshot of success
+            const screenshot = await page.screenshot({ fullPage: true });
+            fs.writeFileSync('success-screenshot.jpg', screenshot);
+            console.log('📸 Success screenshot saved');
+            
+            console.log('✅ Run completed successfully!');
+        } else {
+            console.log('⚠️ No products found in preloaded state');
             const screenshot = await page.screenshot({ fullPage: true });
             fs.writeFileSync('debug-screenshot.jpg', screenshot);
-            console.log('✅ Screenshot saved for debugging');
-            return false;
         }
-        
-        const seen = loadSeenProducts();
-        const newProducts = products.filter(p => p.id && !seen[p.id]);
-        
-        console.log(`📊 Previously seen: ${Object.keys(seen).length} products`);
-        console.log(`🎯 New products found: ${newProducts.length}`);
-        
-        if (newProducts.length > 0) {
-            console.log('📤 Sending Telegram alerts...');
-            
-            // Send first 5 products (avoid rate limiting)
-            for (const product of newProducts.slice(0, 5)) {
-                await sendTelegramAlert(product);
-                seen[product.id] = Date.now();
-                await new Promise(r => setTimeout(r, 2000));
-            }
-            
-            if (newProducts.length > 5) {
-                console.log(`   ... and ${newProducts.length - 5} more products`);
-                // Mark remaining as seen without sending alerts
-                newProducts.slice(5).forEach(p => {
-                    seen[p.id] = Date.now();
-                });
-            }
-            
-            saveSeenProducts(seen);
-        } else {
-            console.log('❌ No new products found');
-        }
-        
-        return true;
         
     } catch (error) {
-        console.log(`❌ Proxy failed: ${error.message}`);
-        return false;
+        console.log(`❌ Error: ${error.message}`);
+        if (browser) {
+            try {
+                const page = (await browser.pages())[0];
+                if (page) {
+                    const screenshot = await page.screenshot({ fullPage: true });
+                    fs.writeFileSync('error-screenshot.jpg', screenshot);
+                }
+            } catch (e) {}
+        }
     } finally {
         if (browser) await browser.close();
     }
 }
 
-async function runSniper() {
-    console.log('🚀 Starting SHEINVERSE Sniper...', new Date().toLocaleString());
-    console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
-    
-    // Try each proxy until one works
-    for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
-        const proxy = getNextProxy();
-        console.log(`\n📡 Attempt ${attempt + 1}/${WEBSHARE_PROXIES.length}`);
-        
-        const success = await scrapeWithProxy(proxy);
-        if (success) {
-            console.log('✅ Successfully scraped!');
-            return;
-        }
-        
-        console.log('⏳ Waiting 5 seconds before next proxy...');
-        await new Promise(r => setTimeout(r, 5000));
-    }
-    
-    console.log('❌ All proxies failed');
-}
-
+// Run once - don't rotate, use the working proxy
 runSniper();
