@@ -59,7 +59,6 @@ function saveSeenProducts(seen) {
         fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
         console.log(`✅ Saved ${Object.keys(seen).length} products to seen_products.json`);
         
-        // Verify file was written
         if (fs.existsSync(SEEN_FILE)) {
             const stats = fs.statSync(SEEN_FILE);
             console.log(`📁 File size: ${stats.size} bytes`);
@@ -249,19 +248,22 @@ async function scrapeWithProxy(proxy) {
             console.log(`🎯 New products found: ${newProducts.length}`);
             
             if (newProducts.length > 0) {
-                console.log(`📤 Sending ${newProducts.length} alerts...`);
+                console.log(`📤 Sending ${newProducts.length} alerts at MAXIMUM SPEED (300ms delay)...`);
                 
                 for (let i = 0; i < newProducts.length; i++) {
                     const product = newProducts[i];
                     console.log(`   ${i+1}/${newProducts.length}: ${product.name.substring(0, 30)}...`);
                     await sendTelegramAlert(product);
                     seen[product.id] = Date.now();
-                    await new Promise(r => setTimeout(r, 2000));
+                    
+                    // ⚡ MAXIMUM SPEED - Only 300ms delay between messages
+                    // Telegram rate limit is ~30 messages per second, 300ms is safe
+                    await new Promise(r => setTimeout(r, 300));
                 }
                 
                 await sendBatchSummary(newProducts.length, newProducts);
                 saveSeenProducts(seen);
-                console.log(`✅ All ${newProducts.length} products alerted and saved`);
+                console.log(`✅ All ${newProducts.length} products alerted and saved at max speed`);
             } else {
                 console.log('❌ No new products found - all products already seen');
             }
@@ -287,7 +289,6 @@ async function runSniper() {
     console.log(`📡 Target URL: ${TARGET_URL}`);
     console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
     
-    // List files in current directory for debugging
     console.log('📁 Files in current directory:');
     const files = fs.readdirSync('.');
     files.forEach(f => console.log(`   - ${f}`));
