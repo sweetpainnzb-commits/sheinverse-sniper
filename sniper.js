@@ -17,12 +17,14 @@ function loadSeenProducts() {
     } catch (e) {
         console.log('No previous data, starting fresh');
     }
-    return {};
+    console.log('📝 First run - will learn all products');
+    return {};  // Empty object for first run
 }
 
 // --- SAVE SEEN PRODUCTS ---
 function saveSeenProducts(seen) {
     fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
+    console.log('✅ Seen products saved to file');
 }
 
 // --- SEND TELEGRAM ALERT ---
@@ -39,11 +41,26 @@ async function sendTelegramAlert(product) {
             formData.append('caption', caption);
             formData.append('parse_mode', 'HTML');
             
-            await fetch.default(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
+            const response = await fetch.default(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
                 method: 'POST',
                 body: formData
             });
-            console.log('✅ Alert sent with image');
+            
+            if (response.ok) {
+                console.log(`✅ Alert sent with image: ${product.name.substring(0, 30)}...`);
+            } else {
+                console.log(`⚠️ Image failed, sending text only for: ${product.name.substring(0, 30)}...`);
+                // Fallback to text only
+                await fetch.default(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chat_id: TELEGRAM_CHAT_ID,
+                        text: caption,
+                        parse_mode: 'HTML'
+                    })
+                });
+            }
         } else {
             await fetch.default(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -54,7 +71,7 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
-            console.log('✅ Alert sent (text only)');
+            console.log(`✅ Alert sent (text only): ${product.name.substring(0, 30)}...`);
         }
     } catch (error) {
         console.error('❌ Failed to send Telegram:', error.message);
@@ -69,6 +86,7 @@ async function runSniper() {
     let browser;
     try {
         // Launch browser with more options for GitHub environment
+        console.log('🌐 Launching browser...');
         browser = await puppeteer.launch({
             headless: true,
             executablePath: '/usr/bin/google-chrome-stable',
@@ -187,15 +205,21 @@ async function runSniper() {
         if (newProducts.length > 0) {
             console.log('📤 Sending Telegram alerts...');
             
-            for (const product of newProducts.slice(0, 5)) {
-                console.log(`   Alerting: ${product.name.substring(0, 30)}...`);
+            // Send first 10 products (to avoid rate limiting)
+            const productsToSend = newProducts.slice(0, 10);
+            for (const product of productsToSend) {
+                console.log(`   Alerting: ${product.name}`);
                 await sendTelegramAlert(product);
                 seen[product.id] = Date.now();
                 await new Promise(r => setTimeout(r, 2000)); // 2 second delay between messages
             }
             
-            if (newProducts.length > 5) {
-                console.log(`   ... and ${newProducts.length - 5} more products`);
+            if (newProducts.length > 10) {
+                console.log(`   ... and ${newProducts.length - 10} more products (will alert next run)`);
+                // Still mark them as seen to avoid re-alerting
+                newProducts.slice(10).forEach(p => {
+                    seen[p.id] = Date.now();
+                });
             }
             
             saveSeenProducts(seen);
@@ -217,4 +241,4 @@ async function runSniper() {
 }
 
 // Run the sniper
-runSniper();
+runSniper().catch(console.error);
