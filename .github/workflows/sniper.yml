@@ -1,9 +1,10 @@
-name: SHEINVERSE Sniper 24/7
+
+name: Sheinverse Sniper
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:  # Manual trigger
 
 jobs:
   snipe:
@@ -13,19 +14,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
       - name: Download previous seen products
         uses: actions/download-artifact@v4
         with:
           name: seen-products
-          path: ./
         continue-on-error: true
       
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      # CRITICAL: Installs necessary libraries for the browser to run
       - name: Install Chrome
         run: |
           sudo apt-get update
@@ -35,30 +34,37 @@ jobs:
         run: |
           npm install puppeteer@latest
           npm install node-fetch@3.3.0
+          npm install form-data
       
       - name: Run sniper
         run: node sniper.js
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}  # Added this
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       
-      # CRITICAL: This is what gives you the HTML/Screenshots
-      - name: Upload debug files
-        uses: actions/upload-artifact@v4
-        if: always() 
-        with:
-          name: debug-files
-          path: |
-            debug-product*
-            debug-error.txt
-            seen_products.json
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Save seen products
-        uses: actions/upload-artifact@v4
+      - name: List all files (debug)
         if: always()
+        run: |
+          echo "=== Root directory ==="
+          ls -la
+          echo ""
+          echo "=== Debug artifacts directory ==="
+          ls -la debug_artifacts/ || echo "debug_artifacts/ does not exist"
+      
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-files-${{ github.run_number }}
+          path: debug_artifacts/
+          retention-days: 7
+        continue-on-error: true
+      
+      - name: Upload seen products
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: seen-products
           path: seen_products.json
-          retention-days: 7
+          retention-days: 90
+        continue-on-error: true
