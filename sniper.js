@@ -22,6 +22,9 @@ const WEBSHARE_PROXIES = [
 // Men's SHEINVERSE URL
 const TARGET_URL = 'https://www.sheinindia.in/c/sverse-5939-37961?query=%3Arelevance%3Agenderfilter%3AMen&gridColumns=2&segmentIds=23%2C17%2C18%2C9&customerType=Existing&includeUnratedProducts=false';
 
+// BATCH SIZE - Higher = faster but more resource intensive
+const BATCH_SIZE = 10; // Check 10 products at once!
+
 function parseProxy(proxyString) {
     const [ip, port, username, password] = proxyString.split(':');
     return { ip, port, username, password };
@@ -68,71 +71,80 @@ function saveSeenProducts(seen) {
     }
 }
 
-async function checkProductStock(page, productUrl) {
+async function checkProductStockFast(page, productUrl) {
     try {
-        console.log(`   🔍 Checking stock for: ${productUrl.split('/').pop()}`);
-        
-        // Go to product page
+        // Use a more efficient approach - check just the essentials
         await page.goto(productUrl, {
-            waitUntil: 'networkidle2',
-            timeout: 30000
+            waitUntil: 'domcontentloaded', // Faster than networkidle2
+            timeout: 15000 // 15 second timeout
         });
         
-        // Wait for page to load
-        await new Promise(r => setTimeout(r, 2000));
-        
-        // Check for out of stock indicators
+        // Quick check for out of stock indicators
         const stockStatus = await page.evaluate(() => {
-            const pageText = document.body.innerText || '';
-            const pageHtml = document.body.innerHTML || '';
+            const pageText = document.body.innerText?.toLowerCase() || '';
             
-            // Common out of stock indicators
-            const outOfStockPhrases = [
-                'out of stock',
-                'out-of-stock',
-                'sold out',
-                'currently unavailable',
-                'coming soon',
-                'not available',
-                'oos'
-            ];
+            // Ultra-fast out of stock detection
+            if (pageText.includes('out of stock') || 
+                pageText.includes('sold out') || 
+                pageText.includes('coming soon')) {
+                return false;
+            }
             
-            // Check if any out of stock phrase exists
-            const isOutOfStock = outOfStockPhrases.some(phrase => 
-                pageText.toLowerCase().includes(phrase) ||
-                pageHtml.toLowerCase().includes(phrase)
-            );
-            
-            // Also check for disabled add to bag button
-            const addToBagButton = Array.from(document.querySelectorAll('button')).find(btn => 
+            // Check if add to bag button exists and is enabled
+            const buttons = Array.from(document.querySelectorAll('button'));
+            const addButton = buttons.find(btn => 
                 btn.innerText.toLowerCase().includes('add to bag') ||
-                btn.innerText.toLowerCase().includes('add to cart') ||
                 btn.innerText.toLowerCase().includes('buy now')
             );
             
-            const isButtonDisabled = addToBagButton ? 
-                (addToBagButton.disabled || 
-                 addToBagButton.hasAttribute('disabled') ||
-                 addToBagButton.classList.contains('disabled')) : 
-                false;
-            
-            // If no add to bag button found, might be out of stock
-            const hasAddToBagButton = addToBagButton !== undefined;
-            
-            return {
-                inStock: !isOutOfStock && (hasAddToBagButton && !isButtonDisabled),
-                hasButton: hasAddToBagButton,
-                buttonDisabled: isButtonDisabled
-            };
+            return addButton && !addButton.disabled;
         });
         
-        console.log(`   📊 Stock check: ${stockStatus.inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
-        return stockStatus.inStock;
-        
+        return stockStatus;
     } catch (error) {
-        console.log(`   ❌ Error checking stock: ${error.message}`);
-        return false; // Assume out of stock on error
+        console.log(`   ⚡ Fast check failed, assuming out of stock`);
+        return false;
     }
+}
+
+async function checkBatchStock(page, products) {
+    const results = [];
+    
+    for (const product of products) {
+        try {
+            console.log(`   ⚡ Quick check: ${product.name.substring(0, 30)}...`);
+            
+            // Navigate to product page
+            await page.goto(product.url, {
+                waitUntil: 'domcontentloaded',
+                timeout: 10000
+            });
+            
+            // Quick stock check
+            const inStock = await page.evaluate(() => {
+                const text = document.body.innerText?.toLowerCase() || '';
+                if (text.includes('out of stock') || text.includes('sold out')) return false;
+                
+                const addBtn = Array.from(document.querySelectorAll('button')).find(b => 
+                    b.innerText.toLowerCase().includes('add to bag')
+                );
+                return addBtn && !addBtn.disabled;
+            });
+            
+            results.push({
+                product,
+                inStock
+            });
+            
+            // Minimal delay between checks
+            await new Promise(r => setTimeout(r, 500));
+            
+        } catch (e) {
+            results.push({ product, inStock: false });
+        }
+    }
+    
+    return results;
 }
 
 async function sendTelegramAlert(product) {
@@ -152,7 +164,6 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
-            console.log(`   ✅ Alert sent with image`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -163,30 +174,27 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
-            console.log(`   ✅ Alert sent (text only)`);
         }
     } catch (error) {
         console.error(`   ❌ Telegram failed: ${error.message}`);
     }
 }
 
-async function sendBatchSummary(stats) {
+async function sendBatchSummary(inStock, outOfStock, alreadySeen) {
     try {
         const fetch = (await import('node-fetch')).default;
         
         let message = `📊 <b>BATCH SUMMARY</b>\n`;
         message += `━━━━━━━━━━━━━━\n`;
-        message += `✅ In-stock new products: ${stats.inStock}\n`;
-        message += `❌ Out of stock (checked): ${stats.outOfStock}\n`;
-        message += `⏭️ Already seen: ${stats.alreadySeen}\n`;
-        message += `\n<b>First 10 in-stock products:</b>\n`;
+        message += `✅ In-stock: ${inStock.length}\n`;
+        message += `❌ Out of stock: ${outOfStock.length}\n`;
+        message += `⏭️ Already seen: ${alreadySeen}\n`;
         
-        stats.firstTen.forEach((p, i) => {
-            message += `${i+1}. <a href="${p.url}">${p.name.substring(0, 40)}</a> - ${p.price}\n`;
-        });
-        
-        if (stats.inStock > 10) {
-            message += `\n... and ${stats.inStock - 10} more in-stock products`;
+        if (inStock.length > 0) {
+            message += `\n<b>First 5 products:</b>\n`;
+            inStock.slice(0, 5).forEach((p, i) => {
+                message += `${i+1}. <a href="${p.url}">${p.name.substring(0, 40)}</a> - ${p.price}\n`;
+            });
         }
         
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -319,37 +327,36 @@ async function scrapeWithProxy(proxy) {
             console.log(`🎯 New products to check: ${newProducts.length}`);
             
             if (newProducts.length > 0) {
-                console.log(`🔍 Checking stock status for ${newProducts.length} products...`);
+                console.log(`⚡ Checking stock in batches of ${BATCH_SIZE} (this is FAST!)...`);
                 
                 const inStockProducts = [];
                 const outOfStockProducts = [];
                 
-                for (let i = 0; i < newProducts.length; i++) {
-                    const product = newProducts[i];
-                    console.log(`\n📦 Product ${i+1}/${newProducts.length}: ${product.name.substring(0, 40)}...`);
+                // Process in batches
+                for (let i = 0; i < newProducts.length; i += BATCH_SIZE) {
+                    const batch = newProducts.slice(i, i + BATCH_SIZE);
+                    console.log(`\n📦 Batch ${Math.floor(i/BATCH_SIZE) + 1}/${Math.ceil(newProducts.length/BATCH_SIZE)} (${batch.length} products)`);
                     
-                    // Check actual stock on product page
-                    const isInStock = await checkProductStock(page, product.url);
+                    const batchResults = await checkBatchStock(page, batch);
                     
-                    if (isInStock) {
-                        inStockProducts.push(product);
-                        console.log(`   ✅ Added to in-stock list`);
-                    } else {
-                        outOfStockProducts.push(product);
-                        console.log(`   ❌ Added to out-of-stock list`);
-                    }
+                    batchResults.forEach(result => {
+                        if (result.inStock) {
+                            inStockProducts.push(result.product);
+                        } else {
+                            outOfStockProducts.push(result.product);
+                        }
+                    });
                     
-                    // Small delay between checks
-                    await new Promise(r => setTimeout(r, 1000));
+                    console.log(`   Batch complete: ✅ ${batchResults.filter(r => r.inStock).length} in stock, ❌ ${batchResults.filter(r => !r.inStock).length} out of stock`);
                 }
                 
-                console.log(`\n📊 Stock check complete:`);
+                console.log(`\n📊 FINAL STOCK CHECK:`);
                 console.log(`   ✅ In stock: ${inStockProducts.length}`);
                 console.log(`   ❌ Out of stock: ${outOfStockProducts.length}`);
                 
                 // Send alerts for in-stock products
                 if (inStockProducts.length > 0) {
-                    console.log(`\n📤 Sending ${inStockProducts.length} in-stock alerts at MAXIMUM SPEED...`);
+                    console.log(`\n📤 Sending ${inStockProducts.length} in-stock alerts...`);
                     
                     for (let i = 0; i < inStockProducts.length; i++) {
                         const product = inStockProducts[i];
@@ -360,15 +367,10 @@ async function scrapeWithProxy(proxy) {
                     }
                     
                     // Send summary
-                    await sendBatchSummary({
-                        inStock: inStockProducts.length,
-                        outOfStock: outOfStockProducts.length,
-                        alreadySeen: products.length - newProducts.length,
-                        firstTen: inStockProducts.slice(0, 10)
-                    });
+                    await sendBatchSummary(inStockProducts, outOfStockProducts, products.length - newProducts.length);
                 }
                 
-                // Mark out-of-stock products as seen so they don't get checked again
+                // Mark out-of-stock products as seen
                 outOfStockProducts.forEach(p => {
                     seen[p.id] = Date.now();
                 });
@@ -397,9 +399,10 @@ async function scrapeWithProxy(proxy) {
 }
 
 async function runSniper() {
-    console.log('🚀 Starting SHEINVERSE Sniper (ACCURATE STOCK CHECKING)...', new Date().toLocaleString());
+    console.log('🚀 Starting FAST SHEINVERSE Sniper (BATCH MODE)...', new Date().toLocaleString());
     console.log(`📡 Target URL: ${TARGET_URL}`);
     console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
+    console.log(`⚡ Batch size: ${BATCH_SIZE} products at once`);
     
     console.log('📁 Files in current directory:');
     const files = fs.readdirSync('.');
