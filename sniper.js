@@ -63,10 +63,18 @@ function saveSeenProducts(seen) {
     }
 }
 
+// Helper function to create safe filename from product ID
+function getSafeFilename(productId) {
+    // Remove any path separators and special characters
+    return productId.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 50);
+}
+
 async function checkProductStockWithDebug(page, product, index) {
     try {
+        const safeId = getSafeFilename(product.id);
         console.log(`\n   🔍 [Product ${index + 1}] Checking: ${product.name.substring(0, 50)}...`);
         console.log(`      URL: ${product.url}`);
+        console.log(`      Safe ID: ${safeId}`);
         
         // Navigate to product page with longer timeout
         await page.goto(product.url, {
@@ -80,14 +88,14 @@ async function checkProductStockWithDebug(page, product, index) {
         
         // Take screenshot - ALWAYS save for first 5
         if (index < 5) {
-            const screenshotPath = `debug_product_${index+1}_${product.id}.jpg`;
+            const screenshotPath = `debug_product_${index+1}_${safeId}.jpg`;
             await page.screenshot({ path: screenshotPath, fullPage: true });
             console.log(`      📸 Saved screenshot: ${screenshotPath}`);
         }
         
         // Save HTML - ALWAYS save for first 5
         if (index < 5) {
-            const htmlPath = `debug_product_${index+1}_${product.id}.html`;
+            const htmlPath = `debug_product_${index+1}_${safeId}.html`;
             const html = await page.content();
             fs.writeFileSync(htmlPath, html);
             console.log(`      📄 Saved HTML: ${htmlPath}`);
@@ -98,7 +106,6 @@ async function checkProductStockWithDebug(page, product, index) {
             const pageText = document.body.innerText || '';
             const pageHtml = document.body.innerHTML || '';
             
-            // Log what we're seeing (this will appear in GitHub logs)
             console.log('      🔎 Looking for stock indicators...');
             
             // Look for "Add to Bag" button with multiple possible texts
@@ -195,15 +202,18 @@ async function checkProductStockWithDebug(page, product, index) {
         // Save error screenshot for first 5
         if (index < 5) {
             try {
-                const errorPath = `debug_error_${index+1}_${product.id}.jpg`;
+                const safeId = getSafeFilename(product.id);
+                const errorPath = `debug_error_${index+1}_${safeId}.jpg`;
                 await page.screenshot({ path: errorPath, fullPage: true });
                 console.log(`      📸 Saved error screenshot: ${errorPath}`);
                 
-                const errorHtmlPath = `debug_error_${index+1}_${product.id}.html`;
+                const errorHtmlPath = `debug_error_${index+1}_${safeId}.html`;
                 const html = await page.content();
                 fs.writeFileSync(errorHtmlPath, html);
                 console.log(`      📄 Saved error HTML: ${errorHtmlPath}`);
-            } catch (e) {}
+            } catch (e) {
+                console.log(`      ❌ Failed to save error debug files: ${e.message}`);
+            }
         }
         
         return false;
