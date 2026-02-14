@@ -19,7 +19,7 @@ const WEBSHARE_PROXIES = [
     '23.229.19.94:8689:vtlrnieh:3cl0gw8tlcsy'
 ];
 
-// Men's SHEINVERSE URL (filtered for Men)
+// Men's SHEINVERSE URL
 const TARGET_URL = 'https://www.sheinindia.in/c/sverse-5939-37961?query=%3Arelevance%3Agenderfilter%3AMen&gridColumns=2&segmentIds=23%2C17%2C18%2C9&customerType=Existing&includeUnratedProducts=false';
 
 function parseProxy(proxyString) {
@@ -42,19 +42,33 @@ function loadSeenProducts() {
     try {
         if (fs.existsSync(SEEN_FILE)) {
             const data = fs.readFileSync(SEEN_FILE, 'utf8');
-            return JSON.parse(data);
+            const seen = JSON.parse(data);
+            console.log(`📂 Loaded ${Object.keys(seen).length} previously seen products`);
+            return seen;
+        } else {
+            console.log('📂 No seen_products.json file found - first run');
         }
     } catch (e) {
-        console.log('No previous data, starting fresh');
+        console.log('❌ Error loading seen products:', e.message);
     }
     return {};
 }
 
 function saveSeenProducts(seen) {
-    fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
+    try {
+        fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
+        console.log(`✅ Saved ${Object.keys(seen).length} products to seen_products.json`);
+        
+        // Verify file was written
+        if (fs.existsSync(SEEN_FILE)) {
+            const stats = fs.statSync(SEEN_FILE);
+            console.log(`📁 File size: ${stats.size} bytes`);
+        }
+    } catch (e) {
+        console.log('❌ Error saving seen products:', e.message);
+    }
 }
 
-// Send individual product alert
 async function sendTelegramAlert(product) {
     const caption = `🆕 <b>${product.name}</b>\n💰 ${product.price}\n🔗 <a href="${product.url}">VIEW PRODUCT</a>`;
     
@@ -72,7 +86,6 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
-            console.log(`✅ Alert sent: ${product.name.substring(0, 30)}...`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -83,14 +96,12 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
-            console.log(`✅ Alert sent: ${product.name.substring(0, 30)}...`);
         }
     } catch (error) {
         console.error('❌ Telegram failed:', error.message);
     }
 }
 
-// Send batch summary if many products
 async function sendBatchSummary(count, products) {
     try {
         const fetch = (await import('node-fetch')).default;
@@ -117,7 +128,6 @@ async function sendBatchSummary(count, products) {
                 parse_mode: 'HTML'
             })
         });
-        console.log(`✅ Batch summary sent for ${count} products`);
     } catch (error) {
         console.error('❌ Batch summary failed:', error.message);
     }
@@ -161,12 +171,10 @@ async function scrapeWithProxy(proxy) {
         
         console.log(`📊 Response status: ${response.status()}`);
         
-        // Wait for products to load
         await page.waitForSelector('.item.rilrtl-products-list__item', { timeout: 30000 });
         
         console.log('📜 Scrolling to load all products...');
         
-        // Scroll more times to load all products
         for (let i = 0; i < 15; i++) {
             await page.evaluate(() => window.scrollBy(0, 800));
             console.log(`   Scroll ${i + 1}/15`);
@@ -180,8 +188,6 @@ async function scrapeWithProxy(proxy) {
         const products = await page.evaluate(() => {
             const items = [];
             const productElements = document.querySelectorAll('.item.rilrtl-products-list__item');
-            
-            console.log(`Found ${productElements.length} product elements`);
             
             productElements.forEach((element) => {
                 try {
@@ -199,7 +205,6 @@ async function scrapeWithProxy(proxy) {
                     
                     let price = "Price N/A";
                     
-                    // Try different price selectors
                     const priceElement = element.querySelector('.price strong, .offer-pricess');
                     if (priceElement) {
                         price = priceElement.innerText.trim();
@@ -238,37 +243,30 @@ async function scrapeWithProxy(proxy) {
         
         if (products.length > 0) {
             const seen = loadSeenProducts();
-            const newProducts = products.filter(p => p.id && !seen[p.id]);
-            
             console.log(`📊 Previously seen: ${Object.keys(seen).length}`);
+            
+            const newProducts = products.filter(p => p.id && !seen[p.id]);
             console.log(`🎯 New products found: ${newProducts.length}`);
             
             if (newProducts.length > 0) {
                 console.log(`📤 Sending ${newProducts.length} alerts...`);
                 
-                // Send individual alerts for ALL new products (no limit!)
                 for (let i = 0; i < newProducts.length; i++) {
                     const product = newProducts[i];
                     console.log(`   ${i+1}/${newProducts.length}: ${product.name.substring(0, 30)}...`);
                     await sendTelegramAlert(product);
                     seen[product.id] = Date.now();
-                    
-                    // Small delay to avoid rate limiting (2 seconds between messages)
                     await new Promise(r => setTimeout(r, 2000));
                 }
                 
-                // Also send a batch summary
                 await sendBatchSummary(newProducts.length, newProducts);
-                
                 saveSeenProducts(seen);
                 console.log(`✅ All ${newProducts.length} products alerted and saved`);
             } else {
-                console.log('❌ No new products found');
+                console.log('❌ No new products found - all products already seen');
             }
         } else {
             console.log('⚠️ No products found');
-            
-            // Take screenshot for debugging
             const screenshot = await page.screenshot({ fullPage: true });
             fs.writeFileSync('debug-screenshot.jpg', screenshot);
             console.log('📸 Debug screenshot saved');
@@ -288,6 +286,11 @@ async function runSniper() {
     console.log('🚀 Starting Men\'s SHEINVERSE Sniper...', new Date().toLocaleString());
     console.log(`📡 Target URL: ${TARGET_URL}`);
     console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
+    
+    // List files in current directory for debugging
+    console.log('📁 Files in current directory:');
+    const files = fs.readdirSync('.');
+    files.forEach(f => console.log(`   - ${f}`));
     
     for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
         const proxy = getNextProxy();
