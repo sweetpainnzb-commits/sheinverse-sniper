@@ -52,54 +52,59 @@ function saveSeenProducts(seen) {
     fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
 }
 
-// SIMPLE stock check with minimal debug
-async function checkProductStock(page, productUrl, productId, productName) {
-    console.log(`   🔍 Checking: ${productName.substring(0, 40)}...`);
+// SIMPLE DEBUG FUNCTION - Just saves HTML and screenshot
+async function debugProductPage(page, productUrl, productId, productName) {
+    console.log(`\n🔍 DEBUGGING: ${productName.substring(0, 50)}`);
     
     try {
-        // Try to load the page with a shorter timeout
-        const response = await page.goto(productUrl, {
-            waitUntil: 'domcontentloaded', // Faster than networkidle2
-            timeout: 15000
-        }).catch(e => {
-            console.log(`   ⚠️ Page load error: ${e.message}`);
-            return null;
+        // Create safe filename (remove special characters)
+        const safeId = productId.replace(/[^a-zA-Z0-9]/g, '_');
+        
+        // Navigate to product page
+        console.log(`   📱 Loading product page...`);
+        await page.goto(productUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
         });
         
-        if (!response) {
-            console.log(`   ❌ Failed to load page - marking out of stock`);
-            return false;
-        }
+        // Wait a bit for everything to load
+        await new Promise(r => setTimeout(r, 5000));
         
-        console.log(`   📊 Status: ${response.status()}`);
+        // 1. Take screenshot
+        const screenshotPath = `debug_${safeId}_screen.jpg`;
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`   ✅ Screenshot saved: ${screenshotPath}`);
         
-        // Quick check for out of stock indicators
-        const pageText = await page.evaluate(() => document.body.innerText?.toLowerCase() || '');
+        // 2. Save FULL HTML
+        const htmlPath = `debug_${safeId}_page.html`;
+        const html = await page.content();
+        fs.writeFileSync(htmlPath, html);
+        console.log(`   ✅ HTML saved: ${htmlPath} (${html.length} bytes)`);
         
-        const outOfStockPhrases = [
-            'out of stock', 'sold out', 'coming soon', 'unavailable'
-        ];
+        // 3. Also save just the text for quick checking
+        const textPath = `debug_${safeId}_text.txt`;
+        const text = await page.evaluate(() => document.body.innerText);
+        fs.writeFileSync(textPath, text);
+        console.log(`   ✅ Text saved: ${textPath}`);
         
-        const hasOutOfStock = outOfStockPhrases.some(phrase => pageText.includes(phrase));
+        // 4. Quick stock check for logging
+        const hasAddToBag = text.toLowerCase().includes('add to bag');
+        const hasOutOfStock = text.toLowerCase().includes('out of stock');
         
-        // Check for add to bag button
-        const hasButton = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
-            return buttons.some(b => 
-                b.innerText.toLowerCase().includes('add to bag') ||
-                b.innerText.toLowerCase().includes('buy now')
-            );
-        });
+        console.log(`   📊 Quick check: Add to Bag found: ${hasAddToBag}, Out of Stock found: ${hasOutOfStock}`);
         
-        const inStock = hasButton && !hasOutOfStock;
-        console.log(`   📊 Has button: ${hasButton}, Out of stock text: ${hasOutOfStock}`);
-        console.log(`   📊 Result: ${inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
-        
-        return inStock;
+        return {
+            screenshot: screenshotPath,
+            html: htmlPath,
+            text: textPath
+        };
         
     } catch (error) {
         console.log(`   ❌ Error: ${error.message}`);
-        return false;
+        // Save error info
+        const errorPath = `debug_${safeId}_error.txt`;
+        fs.writeFileSync(errorPath, `Error: ${error.message}\nStack: ${error.stack}`);
+        return { error: errorPath };
     }
 }
 
@@ -107,6 +112,8 @@ async function scrapeWithProxy(proxy) {
     console.log(`🔄 Trying proxy: ${proxy.ip}:${proxy.port}`);
     
     let browser;
+    const debugFiles = [];
+    
     try {
         const proxyUrl = formatProxyForPuppeteer(proxy);
         
@@ -130,63 +137,77 @@ async function scrapeWithProxy(proxy) {
         
         await page.setViewport({ width: 1920, height: 1080 });
         
-        console.log('📱 Loading listing page...');
+        console.log('📱 Loading Men\'s SHEINVERSE page...');
         
-        const response = await page.goto(TARGET_URL, {
+        await page.goto(TARGET_URL, {
             waitUntil: 'networkidle2',
-            timeout: 30000
+            timeout: 60000
         });
         
-        console.log(`📊 Listing status: ${response.status()}`);
+        await page.waitForSelector('.item.rilrtl-products-list__item', { timeout: 30000 });
         
-        await page.waitForSelector('.item.rilrtl-products-list__item', { timeout: 10000 });
-        
-        console.log('📜 Scrolling...');
+        console.log('📜 Scrolling to load products...');
         for (let i = 0; i < 10; i++) {
             await page.evaluate(() => window.scrollBy(0, 800));
             await new Promise(r => setTimeout(r, 1000));
         }
         
-        console.log('🔍 Extracting products...');
+        console.log('🔍 Extracting first 5 products...');
         
         const products = await page.evaluate(() => {
             const items = [];
-            document.querySelectorAll('.item.rilrtl-products-list__item').forEach(el => {
-                const link = el.querySelector('a');
-                if (!link) return;
-                const href = link.getAttribute('href');
-                const id = href?.match(/-p-(\d+)/)?.[1] || href;
-                const img = el.querySelector('img');
-                const name = img?.getAttribute('alt') || 'Product';
-                items.push({ id, name, url: `https://www.sheinindia.in${href}` });
-            });
+            const productElements = document.querySelectorAll('.item.rilrtl-products-list__item');
+            
+            for (let i = 0; i < Math.min(5, productElements.length); i++) {
+                const element = productElements[i];
+                try {
+                    const link = element.querySelector('a.rilrtl-products-list__link');
+                    if (!link) continue;
+                    
+                    const href = link.getAttribute('href');
+                    const id = href?.match(/-p-(\d+)/)?.[1] || href;
+                    
+                    const img = element.querySelector('img.rilrtl-lazy-img');
+                    const name = img?.getAttribute('alt') || "Shein Product";
+                    
+                    const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
+                    
+                    items.push({
+                        id,
+                        name: name.replace(/Shein\s*/i, '').trim(),
+                        url
+                    });
+                } catch (e) {}
+            }
             return items;
         });
         
-        console.log(`📦 Found ${products.length} products`);
+        console.log(`📦 Found ${products.length} products to debug`);
         
-        const seen = loadSeenProducts();
-        const newProducts = products.filter(p => p.id && !seen[p.id]);
-        console.log(`🎯 New products: ${newProducts.length}`);
-        
-        if (newProducts.length > 0) {
-            // Only check first 2 products for debug
-            const toCheck = newProducts.slice(0, 2);
+        // Debug each product
+        for (let i = 0; i < products.length; i++) {
+            const product = products[i];
+            console.log(`\n🔍 Product ${i+1}/${products.length}: ${product.name}`);
             
-            for (const product of toCheck) {
-                console.log(`\n📦 Checking: ${product.name}`);
-                const inStock = await checkProductStock(page, product.url, product.id, product.name);
-                
-                if (inStock) {
-                    console.log(`   ✅ WOULD SEND ALERT (but skipping for debug)`);
-                }
-                
-                seen[product.id] = Date.now();
-                await new Promise(r => setTimeout(r, 2000));
-            }
+            const debug = await debugProductPage(page, product.url, product.id, product.name);
             
+            // Track all debug files
+            if (debug.screenshot) debugFiles.push(debug.screenshot);
+            if (debug.html) debugFiles.push(debug.html);
+            if (debug.text) debugFiles.push(debug.text);
+            if (debug.error) debugFiles.push(debug.error);
+            
+            // Mark as seen
+            const seen = loadSeenProducts();
+            seen[product.id] = Date.now();
             saveSeenProducts(seen);
+            
+            // Wait between products
+            await new Promise(r => setTimeout(r, 2000));
         }
+        
+        console.log(`\n✅ Debug complete! Generated ${debugFiles.length} debug files:`);
+        debugFiles.forEach(f => console.log(`   - ${f}`));
         
         return true;
         
@@ -199,14 +220,17 @@ async function scrapeWithProxy(proxy) {
 }
 
 async function runSniper() {
-    console.log('🚀 Starting MINIMAL DEBUG...');
+    console.log('🚀 DEBUG MODE - Will generate HTML for 5 products');
     
     for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
         const proxy = getNextProxy();
-        console.log(`\n📡 Attempt ${attempt + 1}`);
+        console.log(`\n📡 Attempt ${attempt + 1}/${WEBSHARE_PROXIES.length}`);
         
         const success = await scrapeWithProxy(proxy);
-        if (success) break;
+        if (success) {
+            console.log('✅ Debug complete! Check Artifacts section for HTML files.');
+            return;
+        }
         
         await new Promise(r => setTimeout(r, 5000));
     }
