@@ -5,24 +5,34 @@ const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Your Webshare proxies that worked
+// Your Webshare proxies
 const WEBSHARE_PROXIES = [
-    'http://vtlrnieh:3cl0gw8tlcsy@31.59.20.176:6754',
-    'http://vtlrnieh:3cl0gw8tlcsy@23.95.150.145:6114',
-    'http://vtlrnieh:3cl0gw8tlcsy@198.23.239.134:6540',
-    'http://vtlrnieh:3cl0gw8tlcsy@45.38.107.97:6014',
-    'http://vtlrnieh:3cl0gw8tlcsy@107.172.163.27:6543',
-    'http://vtlrnieh:3cl0gw8tlcsy@198.105.121.200:6462',
-    'http://vtlrnieh:3cl0gw8tlcsy@64.137.96.74:6641',
-    'http://vtlrnieh:3cl0gw8tlcsy@216.10.27.159:6837',
-    'http://vtlrnieh:3cl0gw8tlcsy@23.26.71.145:5628',
-    'http://vtlrnieh:3cl0gw8tlcsy@23.229.19.94:8689'
+    '31.59.20.176:6754:vtlrnieh:3cl0gw8tlcsy',
+    '23.95.150.145:6114:vtlrnieh:3cl0gw8tlcsy',
+    '198.23.239.134:6540:vtlrnieh:3cl0gw8tlcsy',
+    '45.38.107.97:6014:vtlrnieh:3cl0gw8tlcsy',
+    '107.172.163.27:6543:vtlrnieh:3cl0gw8tlcsy',
+    '198.105.121.200:6462:vtlrnieh:3cl0gw8tlcsy',
+    '64.137.96.74:6641:vtlrnieh:3cl0gw8tlcsy',
+    '216.10.27.159:6837:vtlrnieh:3cl0gw8tlcsy',
+    '23.26.71.145:5628:vtlrnieh:3cl0gw8tlcsy',
+    '23.229.19.94:8689:vtlrnieh:3cl0gw8tlcsy'
 ];
 
-// Simple rotation
+function parseProxy(proxyString) {
+    const [ip, port, username, password] = proxyString.split(':');
+    return { ip, port, username, password };
+}
+
+function formatProxyForPuppeteer(proxy) {
+    return `http://${proxy.ip}:${proxy.port}`;
+}
+
 let currentProxyIndex = 0;
 function getNextProxy() {
-    return WEBSHARE_PROXIES[currentProxyIndex++ % WEBSHARE_PROXIES.length];
+    const proxyString = WEBSHARE_PROXIES[currentProxyIndex];
+    currentProxyIndex = (currentProxyIndex + 1) % WEBSHARE_PROXIES.length;
+    return parseProxy(proxyString);
 }
 
 function loadSeenProducts() {
@@ -58,6 +68,7 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
+            console.log(`✅ Alert sent with image: ${product.name.substring(0, 30)}...`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -68,20 +79,20 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
+            console.log(`✅ Alert sent: ${product.name.substring(0, 30)}...`);
         }
     } catch (error) {
         console.error('❌ Telegram failed:', error.message);
     }
 }
 
-async function runSniper() {
-    console.log('🚀 Starting SHEINVERSE Sniper...', new Date().toLocaleString());
-    
-    const proxy = getNextProxy();
-    console.log(`📡 Using proxy: ${proxy.substring(0, 30)}...`);
+async function scrapeWithProxy(proxy) {
+    console.log(`🔄 Trying proxy: ${proxy.ip}:${proxy.port}`);
     
     let browser;
     try {
+        const proxyUrl = formatProxyForPuppeteer(proxy);
+        
         browser = await puppeteer.launch({
             headless: true,
             executablePath: '/usr/bin/google-chrome-stable',
@@ -89,47 +100,112 @@ async function runSniper() {
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                `--proxy-server=${proxy}`
+                '--disable-blink-features=AutomationControlled',
+                `--proxy-server=${proxyUrl}`
             ]
         });
 
         const page = await browser.newPage();
+        
+        await page.authenticate({
+            username: proxy.username,
+            password: proxy.password
+        });
+        
         await page.setViewport({ width: 1920, height: 1080 });
+        
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         console.log('📱 Loading SHEINVERSE page...');
         
-        await page.goto('https://www.sheinindia.in/c/sverse-5939-37961', {
+        const response = await page.goto('https://www.sheinindia.in/c/sverse-5939-37961', {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
         
-        console.log('✅ Page loaded');
+        console.log(`📊 Response status: ${response.status()}`);
         
-        await new Promise(r => setTimeout(r, 5000));
+        // Wait for products to load
+        await page.waitForSelector('.item.rilrtl-products-list__item', { timeout: 30000 });
         
-        // Extract products from preloaded state
+        console.log('📜 Scrolling to load products...');
+        
+        // Scroll multiple times
+        for (let i = 0; i < 10; i++) {
+            await page.evaluate(() => window.scrollBy(0, 800));
+            console.log(`   Scroll ${i + 1}/10`);
+            await new Promise(r => setTimeout(r, 1500));
+        }
+        
+        await new Promise(r => setTimeout(r, 3000));
+        
+        console.log('🔍 Extracting products...');
+        
+        // Extract products using the correct selectors from the HTML
         const products = await page.evaluate(() => {
             const items = [];
             
-            if (window.__PRELOADED_STATE__?.grid?.entities) {
-                Object.values(window.__PRELOADED_STATE__.grid.entities).forEach(product => {
-                    if (product?.name && product?.url) {
-                        items.push({
-                            id: product.url.split('-p-')[1]?.split('_')[0] || Date.now(),
-                            name: product.name,
-                            price: product.offerPrice?.displayformattedValue || 
-                                   product.price?.displayformattedValue || 
-                                   'Price N/A',
-                            url: product.url.startsWith('http') ? 
-                                 product.url : 
-                                 `https://www.sheinindia.in${product.url}`,
-                            imageUrl: product.images?.[0]?.url ? 
-                                     'https:' + product.images[0].url : 
-                                     null
-                        });
+            // Look for product items using the class from your HTML
+            const productElements = document.querySelectorAll('.item.rilrtl-products-list__item');
+            
+            console.log(`Found ${productElements.length} product elements`);
+            
+            productElements.forEach((element) => {
+                try {
+                    // Find the product link
+                    const link = element.querySelector('a.rilrtl-products-list__link');
+                    if (!link) return;
+                    
+                    const href = link.getAttribute('href');
+                    const id = href?.match(/-p-(\d+)/)?.[1] || href;
+                    
+                    // Find image
+                    const img = element.querySelector('img.rilrtl-lazy-img');
+                    if (!img) return;
+                    
+                    // Get name
+                    let name = img.getAttribute('alt') || "Shein Product";
+                    name = name.replace(/Shein\s*/i, '').trim();
+                    if (name.length > 60) name = name.substring(0, 57) + '...';
+                    
+                    // Get price
+                    let price = "Price N/A";
+                    
+                    // Try different price selectors
+                    const priceElement = element.querySelector('.price strong, .offer-pricess');
+                    if (priceElement) {
+                        price = priceElement.innerText.trim();
+                        if (!price.includes('₹')) price = '₹' + price;
+                    } else {
+                        const text = element.innerText;
+                        const match = text.match(/₹\s*([0-9,]+)/);
+                        if (match) price = `₹${match[1]}`;
                     }
-                });
-            }
+                    
+                    // Get image URL
+                    let imageUrl = img.getAttribute('src') || img.getAttribute('data-src');
+                    if (imageUrl) {
+                        if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
+                        else if (imageUrl.startsWith('/')) imageUrl = 'https://www.sheinindia.in' + imageUrl;
+                        
+                        // Remove size parameters for better quality
+                        imageUrl = imageUrl.replace(/-\d+Wx\d+H-/, '-1000x1500-');
+                    }
+                    
+                    // Build full URL
+                    const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
+                    
+                    items.push({
+                        id,
+                        name,
+                        price,
+                        url,
+                        imageUrl
+                    });
+                } catch (e) {
+                    // Skip errors
+                }
+            });
             
             return items;
         });
@@ -140,6 +216,7 @@ async function runSniper() {
             const seen = loadSeenProducts();
             const newProducts = products.filter(p => p.id && !seen[p.id]);
             
+            console.log(`📊 Previously seen: ${Object.keys(seen).length}`);
             console.log(`🎯 New products: ${newProducts.length}`);
             
             if (newProducts.length > 0) {
@@ -148,15 +225,52 @@ async function runSniper() {
                     seen[product.id] = Date.now();
                     await new Promise(r => setTimeout(r, 2000));
                 }
+                
+                if (newProducts.length > 5) {
+                    console.log(`   ... and ${newProducts.length - 5} more products`);
+                    newProducts.slice(5).forEach(p => seen[p.id] = Date.now());
+                }
+                
                 saveSeenProducts(seen);
             }
+        } else {
+            console.log('⚠️ No products found');
+            
+            // Take screenshot for debugging
+            const screenshot = await page.screenshot({ fullPage: true });
+            fs.writeFileSync('debug-screenshot.jpg', screenshot);
+            console.log('📸 Debug screenshot saved');
         }
         
+        return products.length > 0;
+        
     } catch (error) {
-        console.log(`❌ Error: ${error.message}`);
+        console.log(`❌ Proxy failed: ${error.message}`);
+        return false;
     } finally {
         if (browser) await browser.close();
     }
+}
+
+async function runSniper() {
+    console.log('🚀 Starting SHEINVERSE Sniper...', new Date().toLocaleString());
+    console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
+    
+    for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
+        const proxy = getNextProxy();
+        console.log(`\n📡 Attempt ${attempt + 1}/${WEBSHARE_PROXIES.length}`);
+        
+        const success = await scrapeWithProxy(proxy);
+        if (success) {
+            console.log('✅ Successfully scraped!');
+            return;
+        }
+        
+        console.log('⏳ Waiting 5 seconds before next proxy...');
+        await new Promise(r => setTimeout(r, 5000));
+    }
+    
+    console.log('❌ All proxies failed');
 }
 
 runSniper();
