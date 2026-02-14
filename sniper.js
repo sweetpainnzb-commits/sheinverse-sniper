@@ -5,7 +5,7 @@ const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Your Webshare proxies in the EXACT format that worked
+// Your Webshare proxies that worked
 const WEBSHARE_PROXIES = [
     'http://vtlrnieh:3cl0gw8tlcsy@31.59.20.176:6754',
     'http://vtlrnieh:3cl0gw8tlcsy@23.95.150.145:6114',
@@ -19,12 +19,10 @@ const WEBSHARE_PROXIES = [
     'http://vtlrnieh:3cl0gw8tlcsy@23.229.19.94:8689'
 ];
 
-// Simple rotation - exactly like before
+// Simple rotation
 let currentProxyIndex = 0;
 function getNextProxy() {
-    const proxy = WEBSHARE_PROXIES[currentProxyIndex];
-    currentProxyIndex = (currentProxyIndex + 1) % WEBSHARE_PROXIES.length;
-    return proxy;
+    return WEBSHARE_PROXIES[currentProxyIndex++ % WEBSHARE_PROXIES.length];
 }
 
 function loadSeenProducts() {
@@ -60,7 +58,6 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
-            console.log(`✅ Alert sent with image`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -71,7 +68,6 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
-            console.log(`✅ Alert sent`);
         }
     } catch (error) {
         console.error('❌ Telegram failed:', error.message);
@@ -81,8 +77,7 @@ async function sendTelegramAlert(product) {
 async function runSniper() {
     console.log('🚀 Starting SHEINVERSE Sniper...', new Date().toLocaleString());
     
-    // Try first proxy (the one that worked before)
-    const proxy = WEBSHARE_PROXIES[0]; // Start with first proxy
+    const proxy = getNextProxy();
     console.log(`📡 Using proxy: ${proxy.substring(0, 30)}...`);
     
     let browser;
@@ -110,52 +105,29 @@ async function runSniper() {
         
         console.log('✅ Page loaded');
         
-        // Wait for content
         await new Promise(r => setTimeout(r, 5000));
         
-        // Extract products from preloaded state (same as your working version)
+        // Extract products from preloaded state
         const products = await page.evaluate(() => {
             const items = [];
             
-            if (window.__PRELOADED_STATE__ && 
-                window.__PRELOADED_STATE__.grid && 
-                window.__PRELOADED_STATE__.grid.entities) {
-                
-                const entities = window.__PRELOADED_STATE__.grid.entities;
-                
-                Object.keys(entities).forEach(key => {
-                    try {
-                        const product = entities[key];
-                        if (product && product.name && product.url) {
-                            let price = 'Price N/A';
-                            if (product.offerPrice && product.offerPrice.displayformattedValue) {
-                                price = product.offerPrice.displayformattedValue;
-                            } else if (product.price && product.price.displayformattedValue) {
-                                price = product.price.displayformattedValue;
-                            }
-                            
-                            let imageUrl = '';
-                            if (product.images && product.images.length > 0) {
-                                imageUrl = product.images[0].url;
-                                if (imageUrl && !imageUrl.startsWith('http')) {
-                                    imageUrl = 'https:' + imageUrl;
-                                }
-                            }
-                            
-                            const id = product.url.split('-p-')[1]?.split('_')[0] || key;
-                            const url = product.url.startsWith('http') ? 
-                                        product.url : 
-                                        `https://www.sheinindia.in${product.url}`;
-                            
-                            items.push({
-                                id: id,
-                                name: product.name || 'Shein Product',
-                                price: price,
-                                url: url,
-                                imageUrl: imageUrl
-                            });
-                        }
-                    } catch (e) {}
+            if (window.__PRELOADED_STATE__?.grid?.entities) {
+                Object.values(window.__PRELOADED_STATE__.grid.entities).forEach(product => {
+                    if (product?.name && product?.url) {
+                        items.push({
+                            id: product.url.split('-p-')[1]?.split('_')[0] || Date.now(),
+                            name: product.name,
+                            price: product.offerPrice?.displayformattedValue || 
+                                   product.price?.displayformattedValue || 
+                                   'Price N/A',
+                            url: product.url.startsWith('http') ? 
+                                 product.url : 
+                                 `https://www.sheinindia.in${product.url}`,
+                            imageUrl: product.images?.[0]?.url ? 
+                                     'https:' + product.images[0].url : 
+                                     null
+                        });
+                    }
                 });
             }
             
@@ -178,34 +150,13 @@ async function runSniper() {
                 }
                 saveSeenProducts(seen);
             }
-            
-            // Take screenshot of success
-            const screenshot = await page.screenshot({ fullPage: true });
-            fs.writeFileSync('success-screenshot.jpg', screenshot);
-            console.log('📸 Success screenshot saved');
-            
-            console.log('✅ Run completed successfully!');
-        } else {
-            console.log('⚠️ No products found in preloaded state');
-            const screenshot = await page.screenshot({ fullPage: true });
-            fs.writeFileSync('debug-screenshot.jpg', screenshot);
         }
         
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
-        if (browser) {
-            try {
-                const page = (await browser.pages())[0];
-                if (page) {
-                    const screenshot = await page.screenshot({ fullPage: true });
-                    fs.writeFileSync('error-screenshot.jpg', screenshot);
-                }
-            } catch (e) {}
-        }
     } finally {
         if (browser) await browser.close();
     }
 }
 
-// Run once - don't rotate, use the working proxy
 runSniper();
