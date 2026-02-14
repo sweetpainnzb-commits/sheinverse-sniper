@@ -45,12 +45,11 @@ function loadSeenProducts() {
             const seen = JSON.parse(data);
             console.log(`📂 Loaded ${Object.keys(seen).length} previously seen products`);
             return seen;
-        } else {
-            console.log('📂 No seen_products.json file found - first run');
+        } catch (e) {
+            console.log('❌ Error loading seen products:', e.message);
         }
-    } catch (e) {
-        console.log('❌ Error loading seen products:', e.message);
     }
+    console.log('📂 No seen_products.json file found - first run');
     return {};
 }
 
@@ -63,9 +62,13 @@ function saveSeenProducts(seen) {
     }
 }
 
-// Helper function to create safe filename from product ID
 function getSafeFilename(productId) {
-    // Remove any path separators and special characters
+    // Extract just the product code (the part after /p/)
+    const match = productId.match(/\/p\/([^\/]+)/);
+    if (match && match[1]) {
+        return match[1]; // Returns something like "443326049_darkblue"
+    }
+    // Fallback: remove special characters
     return productId.replace(/[\/\\:*?"<>|]/g, '_').substring(0, 50);
 }
 
@@ -74,148 +77,82 @@ async function checkProductStockWithDebug(page, product, index) {
         const safeId = getSafeFilename(product.id);
         console.log(`\n   🔍 [Product ${index + 1}] Checking: ${product.name.substring(0, 50)}...`);
         console.log(`      URL: ${product.url}`);
-        console.log(`      Safe ID: ${safeId}`);
+        console.log(`      Product Code: ${safeId}`);
         
-        // Navigate to product page with longer timeout
         await page.goto(product.url, {
             waitUntil: 'networkidle2',
             timeout: 60000
         });
         
-        // CRITICAL: Wait longer for page to fully render
         console.log(`      ⏳ Waiting 5 seconds for page to render...`);
         await new Promise(r => setTimeout(r, 5000));
         
-        // Take screenshot - ALWAYS save for first 5
-        if (index < 5) {
-            const screenshotPath = `debug_product_${index+1}_${safeId}.jpg`;
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            console.log(`      📸 Saved screenshot: ${screenshotPath}`);
-        }
+        // Take screenshot - use product code for filename
+        const screenshotPath = `product_${index+1}_${safeId}.jpg`;
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`      📸 Saved screenshot: ${screenshotPath}`);
         
-        // Save HTML - ALWAYS save for first 5
-        if (index < 5) {
-            const htmlPath = `debug_product_${index+1}_${safeId}.html`;
-            const html = await page.content();
-            fs.writeFileSync(htmlPath, html);
-            console.log(`      📄 Saved HTML: ${htmlPath}`);
-        }
+        // Save HTML - use product code for filename
+        const htmlPath = `product_${index+1}_${safeId}.html`;
+        const html = await page.content();
+        fs.writeFileSync(htmlPath, html);
+        console.log(`      📄 Saved HTML: ${htmlPath}`);
         
-        // Check stock status thoroughly
+        // Check stock status
         const stockStatus = await page.evaluate(() => {
-            const pageText = document.body.innerText || '';
-            const pageHtml = document.body.innerHTML || '';
+            const pageText = document.body.innerText?.toLowerCase() || '';
+            const pageHtml = document.body.innerHTML?.toLowerCase() || '';
             
-            console.log('      🔎 Looking for stock indicators...');
-            
-            // Look for "Add to Bag" button with multiple possible texts
-            const buttons = Array.from(document.querySelectorAll('button, .btn, [class*="add"], [class*="bag"], [class*="cart"]'));
-            
-            let addToBagButton = null;
+            // Look for "Add to Bag" button
+            const buttons = Array.from(document.querySelectorAll('button, .btn, [class*="add"], [class*="bag"]'));
+            let addButton = null;
             for (const btn of buttons) {
-                const btnText = (btn.innerText || '').toLowerCase();
-                const btnHtml = (btn.outerHTML || '').toLowerCase();
-                
-                if (btnText.includes('add to bag') || 
-                    btnText.includes('add to cart') || 
-                    btnText.includes('buy now') ||
-                    btnText.includes('add to bag') ||
-                    btnHtml.includes('add-to-bag') ||
-                    btnHtml.includes('addtobag')) {
-                    addToBagButton = btn;
+                const text = (btn.innerText || '').toLowerCase();
+                if (text.includes('add to bag') || text.includes('buy now')) {
+                    addButton = btn;
                     break;
                 }
             }
             
-            const hasAddButton = !!addToBagButton;
-            const isButtonDisabled = addToBagButton ? 
-                (addToBagButton.disabled || 
-                 addToBagButton.hasAttribute('disabled') ||
-                 addToBagButton.classList.contains('disabled') ||
-                 addToBagButton.getAttribute('aria-disabled') === 'true') : 
-                true;
+            const hasAddButton = !!addButton;
+            const isButtonDisabled = addButton ? 
+                (addButton.disabled || addButton.hasAttribute('disabled')) : true;
             
             // Check for out of stock text
-            const lowerText = pageText.toLowerCase();
-            const outOfStockPhrases = [
-                'out of stock', 'sold out', 'coming soon', 
-                'currently unavailable', 'not available', 'oos',
-                'temporarily unavailable', 'out of stock'
-            ];
-            
-            const hasOutOfStockText = outOfStockPhrases.some(phrase => 
-                lowerText.includes(phrase)
-            );
+            const outOfStockPhrases = ['out of stock', 'sold out', 'coming soon', 'unavailable'];
+            const hasOutOfStock = outOfStockPhrases.some(p => pageText.includes(p));
             
             // Check for "In Stock" text
-            const hasInStockText = lowerText.includes('in stock') || 
-                                   lowerText.includes('available');
+            const hasInStock = pageText.includes('in stock') || pageText.includes('available');
             
-            // Look for price
-            const hasPrice = lowerText.includes('₹') || pageHtml.includes('₹');
-            
-            // Make stock determination
+            // Make determination
             let inStock = false;
             let reason = '';
             
             if (hasAddButton && !isButtonDisabled) {
                 inStock = true;
-                reason = 'Enabled Add to Bag button found';
-            } else if (hasAddButton && isButtonDisabled && !hasOutOfStockText) {
-                // Button disabled but no OOS text - might be loading issue
-                inStock = false;
-                reason = 'Button disabled but no OOS text';
-            } else if (hasOutOfStockText) {
+                reason = 'Enabled Add to Bag button';
+            } else if (hasInStock) {
+                inStock = true;
+                reason = '"In Stock" text found';
+            } else if (hasOutOfStock) {
                 inStock = false;
                 reason = 'Out of stock text found';
-            } else if (hasInStockText && hasPrice) {
-                inStock = true;
-                reason = 'In stock text found';
             } else {
                 inStock = false;
-                reason = 'No clear indicators';
+                reason = 'No clear stock indicators';
             }
             
-            return {
-                inStock,
-                reason,
-                debug: {
-                    hasAddButton,
-                    isButtonDisabled,
-                    hasOutOfStockText,
-                    hasInStockText,
-                    hasPrice,
-                    buttonText: addToBagButton?.innerText?.substring(0, 50) || 'none'
-                }
-            };
+            return { inStock, reason, hasAddButton, isButtonDisabled };
         });
         
         console.log(`      📊 Result: ${stockStatus.inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
         console.log(`      📝 Reason: ${stockStatus.reason}`);
-        console.log(`      🔧 Debug: AddBtn=${stockStatus.debug.hasAddButton}, Disabled=${stockStatus.debug.isButtonDisabled}, OOSText=${stockStatus.debug.hasOutOfStockText}`);
         
         return stockStatus.inStock;
         
     } catch (error) {
-        console.log(`      ❌ Error checking stock: ${error.message}`);
-        
-        // Save error screenshot for first 5
-        if (index < 5) {
-            try {
-                const safeId = getSafeFilename(product.id);
-                const errorPath = `debug_error_${index+1}_${safeId}.jpg`;
-                await page.screenshot({ path: errorPath, fullPage: true });
-                console.log(`      📸 Saved error screenshot: ${errorPath}`);
-                
-                const errorHtmlPath = `debug_error_${index+1}_${safeId}.html`;
-                const html = await page.content();
-                fs.writeFileSync(errorHtmlPath, html);
-                console.log(`      📄 Saved error HTML: ${errorHtmlPath}`);
-            } catch (e) {
-                console.log(`      ❌ Failed to save error debug files: ${e.message}`);
-            }
-        }
-        
+        console.log(`      ❌ Error: ${error.message}`);
         return false;
     }
 }
@@ -325,44 +262,30 @@ async function scrapeWithProxy(proxy) {
         
         if (products.length > 0) {
             const seen = loadSeenProducts();
-            
-            // Filter out already seen products
             const newProducts = products.filter(p => p.id && !seen[p.id]);
             console.log(`🎯 New products to check: ${newProducts.length}`);
             
             if (newProducts.length > 0) {
                 console.log(`\n🔬 Checking ONLY FIRST 5 products for debugging...`);
-                console.log(`📸 Will save screenshots & HTML for each\n`);
+                console.log(`📸 Will save screenshots & HTML with product codes\n`);
                 
-                const productsToCheck = newProducts.slice(0, 5); // ONLY CHECK FIRST 5
-                const inStockProducts = [];
-                const outOfStockProducts = [];
+                const productsToCheck = newProducts.slice(0, 5);
+                const savedFiles = [];
                 
                 for (let i = 0; i < productsToCheck.length; i++) {
                     const product = productsToCheck[i];
-                    const inStock = await checkProductStockWithDebug(page, product, i);
+                    const safeId = getSafeFilename(product.id);
                     
-                    if (inStock) {
-                        inStockProducts.push(product);
-                    } else {
-                        outOfStockProducts.push(product);
-                    }
+                    await checkProductStockWithDebug(page, product, i);
                     
-                    // Don't mark as seen yet - we're just debugging
+                    // Track saved files
+                    savedFiles.push(`product_${i+1}_${safeId}.jpg`);
+                    savedFiles.push(`product_${i+1}_${safeId}.html`);
                 }
                 
-                console.log(`\n📊 DEBUG RESULTS (First 5 products only):`);
-                console.log(`   ✅ In stock: ${inStockProducts.length}`);
-                console.log(`   ❌ Out of stock: ${outOfStockProducts.length}`);
-                
-                // Save a summary file
-                const summary = {
-                    timestamp: Date.now(),
-                    inStock: inStockProducts.map(p => ({ id: p.id, name: p.name })),
-                    outOfStock: outOfStockProducts.map(p => ({ id: p.id, name: p.name }))
-                };
-                fs.writeFileSync('debug_summary.json', JSON.stringify(summary, null, 2));
-                console.log(`📊 Saved debug_summary.json`);
+                // Save a list of all generated files
+                fs.writeFileSync('generated_files.txt', savedFiles.join('\n'));
+                console.log(`📋 Saved list of generated files`);
                 
             } else {
                 console.log('❌ No new products found to check');
@@ -383,7 +306,8 @@ async function runSniper() {
     console.log('🚀 Starting DEBUG Sniper - Will check ONLY first 5 products', new Date().toLocaleString());
     console.log(`📡 Target URL: ${TARGET_URL}`);
     console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
-    console.log(`📸 Will save screenshots & HTML for first 5 products ONLY\n`);
+    console.log(`📸 Will save screenshots & HTML for first 5 products ONLY`);
+    console.log(`📁 Files will be named with product codes (e.g., product_1_443326049_darkblue.jpg)\n`);
     
     for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
         const proxy = getNextProxy();
@@ -391,7 +315,14 @@ async function runSniper() {
         
         const success = await scrapeWithProxy(proxy);
         if (success) {
-            console.log('✅ Debug run completed! Check artifacts for screenshots and HTML.');
+            console.log('✅ Debug run completed!');
+            console.log('📁 Check artifacts for the following files:');
+            console.log('   - product_1_*.jpg and .html');
+            console.log('   - product_2_*.jpg and .html');
+            console.log('   - product_3_*.jpg and .html');
+            console.log('   - product_4_*.jpg and .html');
+            console.log('   - product_5_*.jpg and .html');
+            console.log('   - generated_files.txt');
             return;
         }
         
