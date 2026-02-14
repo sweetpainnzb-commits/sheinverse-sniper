@@ -25,6 +25,12 @@ jobs:
         with:
           node-version: '20'
       
+      # CRITICAL: Installs necessary libraries for the browser to run
+      - name: Install Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+      
       - name: Install dependencies
         run: |
           npm install puppeteer@latest
@@ -34,23 +40,24 @@ jobs:
         run: node sniper.js
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}  # Added this
       
+      # CRITICAL: This is what gives you the HTML/Screenshots
       - name: Upload debug files
-        if: always() # Runs even if the script fails
         uses: actions/upload-artifact@v4
+        if: always() 
         with:
-          name: shein-debug-package
+          name: debug-files
           path: |
-            debug_*.html
-            debug_*.png
+            debug-product*
+            debug-error.txt
             seen_products.json
           if-no-files-found: warn
           retention-days: 7
-      
-      - name: Save seen products (Persistence)
-        if: always()
+
+      - name: Save seen products
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: seen-products
           path: seen_products.json
