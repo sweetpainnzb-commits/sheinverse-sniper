@@ -6,9 +6,5 @@
   "scripts": {
     "start": "node sniper.js"
   },
-  "dependencies": {
-    "puppeteer": "^21.0.0",
-    "node-fetch": "^3.3.0"
-  },
   "type": "module"
 }
