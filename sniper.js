@@ -68,8 +68,74 @@ function saveSeenProducts(seen) {
     }
 }
 
+async function checkProductStock(page, productUrl) {
+    try {
+        console.log(`   🔍 Checking stock for: ${productUrl.split('/').pop()}`);
+        
+        // Go to product page
+        await page.goto(productUrl, {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+        });
+        
+        // Wait for page to load
+        await new Promise(r => setTimeout(r, 2000));
+        
+        // Check for out of stock indicators
+        const stockStatus = await page.evaluate(() => {
+            const pageText = document.body.innerText || '';
+            const pageHtml = document.body.innerHTML || '';
+            
+            // Common out of stock indicators
+            const outOfStockPhrases = [
+                'out of stock',
+                'out-of-stock',
+                'sold out',
+                'currently unavailable',
+                'coming soon',
+                'not available',
+                'oos'
+            ];
+            
+            // Check if any out of stock phrase exists
+            const isOutOfStock = outOfStockPhrases.some(phrase => 
+                pageText.toLowerCase().includes(phrase) ||
+                pageHtml.toLowerCase().includes(phrase)
+            );
+            
+            // Also check for disabled add to bag button
+            const addToBagButton = Array.from(document.querySelectorAll('button')).find(btn => 
+                btn.innerText.toLowerCase().includes('add to bag') ||
+                btn.innerText.toLowerCase().includes('add to cart') ||
+                btn.innerText.toLowerCase().includes('buy now')
+            );
+            
+            const isButtonDisabled = addToBagButton ? 
+                (addToBagButton.disabled || 
+                 addToBagButton.hasAttribute('disabled') ||
+                 addToBagButton.classList.contains('disabled')) : 
+                false;
+            
+            // If no add to bag button found, might be out of stock
+            const hasAddToBagButton = addToBagButton !== undefined;
+            
+            return {
+                inStock: !isOutOfStock && (hasAddToBagButton && !isButtonDisabled),
+                hasButton: hasAddToBagButton,
+                buttonDisabled: isButtonDisabled
+            };
+        });
+        
+        console.log(`   📊 Stock check: ${stockStatus.inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
+        return stockStatus.inStock;
+        
+    } catch (error) {
+        console.log(`   ❌ Error checking stock: ${error.message}`);
+        return false; // Assume out of stock on error
+    }
+}
+
 async function sendTelegramAlert(product) {
-    // Add IN STOCK badge to message
     const caption = `🆕 <b>${product.name}</b>\n💰 ${product.price} ✅ IN STOCK\n🔗 <a href="${product.url}">VIEW PRODUCT</a>`;
     
     try {
@@ -86,6 +152,7 @@ async function sendTelegramAlert(product) {
                 method: 'POST',
                 body: formData
             });
+            console.log(`   ✅ Alert sent with image`);
         } else {
             await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
                 method: 'POST',
@@ -96,30 +163,30 @@ async function sendTelegramAlert(product) {
                     parse_mode: 'HTML'
                 })
             });
+            console.log(`   ✅ Alert sent (text only)`);
         }
     } catch (error) {
-        console.error('❌ Telegram failed:', error.message);
+        console.error(`   ❌ Telegram failed: ${error.message}`);
     }
 }
 
-async function sendBatchSummary(count, products, outOfStockCount) {
+async function sendBatchSummary(stats) {
     try {
         const fetch = (await import('node-fetch')).default;
         
         let message = `📊 <b>BATCH SUMMARY</b>\n`;
         message += `━━━━━━━━━━━━━━\n`;
-        message += `✅ In-stock new products: ${count}\n`;
-        if (outOfStockCount > 0) {
-            message += `❌ Out of stock (skipped): ${outOfStockCount}\n`;
-        }
+        message += `✅ In-stock new products: ${stats.inStock}\n`;
+        message += `❌ Out of stock (checked): ${stats.outOfStock}\n`;
+        message += `⏭️ Already seen: ${stats.alreadySeen}\n`;
         message += `\n<b>First 10 in-stock products:</b>\n`;
         
-        products.slice(0, 10).forEach((p, i) => {
+        stats.firstTen.forEach((p, i) => {
             message += `${i+1}. <a href="${p.url}">${p.name.substring(0, 40)}</a> - ${p.price}\n`;
         });
         
-        if (count > 10) {
-            message += `\n... and ${count - 10} more in-stock products`;
+        if (stats.inStock > 10) {
+            message += `\n... and ${stats.inStock - 10} more in-stock products`;
         }
         
         await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -186,7 +253,7 @@ async function scrapeWithProxy(proxy) {
         
         await new Promise(r => setTimeout(r, 3000));
         
-        console.log('🔍 Extracting products with stock status...');
+        console.log('🔍 Extracting products from listing...');
         
         const products = await page.evaluate(() => {
             const items = [];
@@ -217,27 +284,6 @@ async function scrapeWithProxy(proxy) {
                         if (match) price = `₹${match[1]}`;
                     }
                     
-                    // Check stock status - multiple indicators
-                    const elementHtml = element.outerHTML || '';
-                    const elementText = element.innerText || '';
-                    
-                    // Stock indicators from HTML
-                    const inStock = 
-                        !elementHtml.includes('out-of-stock') && 
-                        !elementHtml.includes('outOfStock') &&
-                        !elementText.includes('Out of Stock') &&
-                        !elementText.includes('Sold Out') &&
-                        !elementText.includes('Coming Soon');
-                    
-                    // Also check for "In Stock" text
-                    const hasInStockText = 
-                        elementText.includes('In Stock') || 
-                        elementHtml.includes('in-stock') ||
-                        elementHtml.includes('inStock');
-                    
-                    // If we have explicit "In Stock" or no out-of-stock indicators
-                    const isAvailable = hasInStockText || inStock;
-                    
                     let imageUrl = img.getAttribute('src') || img.getAttribute('data-src');
                     if (imageUrl) {
                         if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
@@ -252,8 +298,7 @@ async function scrapeWithProxy(proxy) {
                         name,
                         price,
                         url,
-                        imageUrl,
-                        inStock: isAvailable  // Add stock status
+                        imageUrl
                     });
                 } catch (e) {
                     // Skip errors
@@ -263,64 +308,85 @@ async function scrapeWithProxy(proxy) {
             return items;
         });
         
-        console.log(`📦 Found ${products.length} total products`);
+        console.log(`📦 Found ${products.length} total products on listing`);
         
         if (products.length > 0) {
             const seen = loadSeenProducts();
-            console.log(`📊 Previously seen: ${Object.keys(seen).length}`);
+            console.log(`📊 Previously seen in history: ${Object.keys(seen).length}`);
             
-            // Filter out out-of-stock products and already seen
-            const allNewProducts = products.filter(p => p.id && !seen[p.id]);
-            const inStockNewProducts = allNewProducts.filter(p => p.inStock === true);
-            const outOfStockNewProducts = allNewProducts.filter(p => p.inStock === false);
+            // Filter out already seen products
+            const newProducts = products.filter(p => p.id && !seen[p.id]);
+            console.log(`🎯 New products to check: ${newProducts.length}`);
             
-            console.log(`🎯 New products found: ${allNewProducts.length}`);
-            console.log(`   ✅ In stock: ${inStockNewProducts.length}`);
-            console.log(`   ❌ Out of stock: ${outOfStockNewProducts.length}`);
-            
-            if (inStockNewProducts.length > 0) {
-                console.log(`📤 Sending ${inStockNewProducts.length} in-stock alerts at MAXIMUM SPEED (300ms delay)...`);
+            if (newProducts.length > 0) {
+                console.log(`🔍 Checking stock status for ${newProducts.length} products...`);
                 
-                for (let i = 0; i < inStockNewProducts.length; i++) {
-                    const product = inStockNewProducts[i];
-                    console.log(`   ${i+1}/${inStockNewProducts.length}: ${product.name.substring(0, 30)}...`);
-                    await sendTelegramAlert(product);
-                    seen[product.id] = Date.now();
+                const inStockProducts = [];
+                const outOfStockProducts = [];
+                
+                for (let i = 0; i < newProducts.length; i++) {
+                    const product = newProducts[i];
+                    console.log(`\n📦 Product ${i+1}/${newProducts.length}: ${product.name.substring(0, 40)}...`);
                     
-                    // ⚡ MAXIMUM SPEED - 300ms delay
-                    await new Promise(r => setTimeout(r, 300));
+                    // Check actual stock on product page
+                    const isInStock = await checkProductStock(page, product.url);
+                    
+                    if (isInStock) {
+                        inStockProducts.push(product);
+                        console.log(`   ✅ Added to in-stock list`);
+                    } else {
+                        outOfStockProducts.push(product);
+                        console.log(`   ❌ Added to out-of-stock list`);
+                    }
+                    
+                    // Small delay between checks
+                    await new Promise(r => setTimeout(r, 1000));
                 }
                 
-                // Also mark out-of-stock products as seen so they don't alert later
-                outOfStockNewProducts.forEach(p => {
+                console.log(`\n📊 Stock check complete:`);
+                console.log(`   ✅ In stock: ${inStockProducts.length}`);
+                console.log(`   ❌ Out of stock: ${outOfStockProducts.length}`);
+                
+                // Send alerts for in-stock products
+                if (inStockProducts.length > 0) {
+                    console.log(`\n📤 Sending ${inStockProducts.length} in-stock alerts at MAXIMUM SPEED...`);
+                    
+                    for (let i = 0; i < inStockProducts.length; i++) {
+                        const product = inStockProducts[i];
+                        console.log(`   ${i+1}/${inStockProducts.length}: ${product.name.substring(0, 30)}...`);
+                        await sendTelegramAlert(product);
+                        seen[product.id] = Date.now();
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+                    
+                    // Send summary
+                    await sendBatchSummary({
+                        inStock: inStockProducts.length,
+                        outOfStock: outOfStockProducts.length,
+                        alreadySeen: products.length - newProducts.length,
+                        firstTen: inStockProducts.slice(0, 10)
+                    });
+                }
+                
+                // Mark out-of-stock products as seen so they don't get checked again
+                outOfStockProducts.forEach(p => {
                     seen[p.id] = Date.now();
                 });
                 
-                await sendBatchSummary(inStockNewProducts.length, inStockNewProducts, outOfStockNewProducts.length);
                 saveSeenProducts(seen);
-                console.log(`✅ All ${inStockNewProducts.length} in-stock products alerted and saved`);
-                if (outOfStockNewProducts.length > 0) {
-                    console.log(`⏭️ Skipped ${outOfStockNewProducts.length} out-of-stock products`);
-                }
+                console.log(`✅ All products processed and saved`);
+                
             } else {
-                console.log('❌ No new in-stock products found');
-                if (outOfStockNewProducts.length > 0) {
-                    console.log(`   (Found ${outOfStockNewProducts.length} out-of-stock products - marked as seen)`);
-                    // Still mark out-of-stock as seen
-                    outOfStockNewProducts.forEach(p => {
-                        seen[p.id] = Date.now();
-                    });
-                    saveSeenProducts(seen);
-                }
+                console.log('❌ No new products found to check');
             }
         } else {
-            console.log('⚠️ No products found');
+            console.log('⚠️ No products found on listing');
             const screenshot = await page.screenshot({ fullPage: true });
             fs.writeFileSync('debug-screenshot.jpg', screenshot);
             console.log('📸 Debug screenshot saved');
         }
         
-        return products.length > 0;
+        return true;
         
     } catch (error) {
         console.log(`❌ Proxy failed: ${error.message}`);
@@ -331,7 +397,7 @@ async function scrapeWithProxy(proxy) {
 }
 
 async function runSniper() {
-    console.log('🚀 Starting Men\'s SHEINVERSE Sniper (In-Stock Only)...', new Date().toLocaleString());
+    console.log('🚀 Starting SHEINVERSE Sniper (ACCURATE STOCK CHECKING)...', new Date().toLocaleString());
     console.log(`📡 Target URL: ${TARGET_URL}`);
     console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
     
