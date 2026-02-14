@@ -88,71 +88,155 @@ async function runSniper() {
             timeout: 60000
         });
         
-        await page.waitForSelector('a[href*="/p-"]', { timeout: 30000 });
+        console.log('✅ Page loaded, waiting for content...');
+        
+        // Wait for any product-related elements to load
+        await page.waitForFunction(() => {
+            return document.querySelectorAll('img').length > 10;
+        }, { timeout: 30000 });
         
         console.log('📜 Scrolling to load products...');
-        for (let i = 0; i < 8; i++) {
+        
+        // Scroll multiple times
+        for (let i = 0; i < 10; i++) {
             await page.evaluate(() => window.scrollBy(0, 1000));
-            await new Promise(r => setTimeout(r, 1000));
+            console.log(`   Scroll ${i + 1}/10`);
+            await new Promise(r => setTimeout(r, 1500));
         }
         
+        // Scroll back to top
+        await page.evaluate(() => window.scrollTo(0, 0));
         await new Promise(r => setTimeout(r, 2000));
         
-        console.log('🔍 Extracting products...');
+        console.log('🔍 Extracting products with multiple methods...');
         
+        // Method 1: Try multiple selectors
         const products = await page.evaluate(() => {
             const items = [];
-            document.querySelectorAll('a[href*="/p-"]').forEach(link => {
-                const href = link.getAttribute('href');
-                const id = href?.match(/-p-(\d+)/)?.[1] || href;
-                
-                const container = link.closest('div') || link.parentElement;
-                if (!container) return;
-                
-                const imgEl = container.querySelector('img');
-                if (!imgEl) return;
-                
-                let name = imgEl?.getAttribute('alt') || "Shein Product";
-                name = name.substring(0, 50);
-                
-                let price = "Price N/A";
-                const priceMatch = container.innerText.match(/₹\s*([0-9,]+)/);
-                if (priceMatch) price = `₹${priceMatch[1]}`;
-                
-                let imageUrl = imgEl?.getAttribute('src') || imgEl?.getAttribute('data-src');
-                if (imageUrl) {
-                    if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
-                    else if (imageUrl.startsWith('/')) imageUrl = 'https://www.sheinindia.in' + imageUrl;
+            
+            // Try different possible product selectors
+            const selectors = [
+                'a[href*="/p-"]',
+                'a[href*="-p-"]',
+                '.product-card a',
+                '.item a',
+                '[class*="product"] a[href]',
+                '[class*="item"] a[href]'
+            ];
+            
+            let links = [];
+            for (const selector of selectors) {
+                const found = document.querySelectorAll(selector);
+                if (found.length > 0) {
+                    console.log(`Found ${found.length} links with selector: ${selector}`);
+                    links = found;
+                    break;
                 }
-                
-                const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
-                
-                items.push({ id, name, price, url, imageUrl });
+            }
+            
+            if (links.length === 0) {
+                // Last resort: look for any link with image
+                links = document.querySelectorAll('a');
+            }
+            
+            links.forEach((link) => {
+                try {
+                    const href = link.getAttribute('href');
+                    if (!href || (!href.includes('/p-') && !href.includes('-p-'))) return;
+                    
+                    const id = href.match(/-p-(\d+)/)?.[1] || href;
+                    
+                    // Try to find the product container
+                    const container = link.closest('div[class*="product"], div[class*="item"], li[class*="product"], div') || link.parentElement;
+                    if (!container) return;
+                    
+                    // Find image
+                    const imgEl = container.querySelector('img') || link.querySelector('img');
+                    if (!imgEl) return;
+                    
+                    // Get product name
+                    let name = imgEl.getAttribute('alt') || 
+                              container.innerText.split('\n')[0] || 
+                              "Shein Product";
+                    name = name.replace(/Shop\s*|\s*\|\s*Shein India/i, '').trim();
+                    if (name.length > 50) name = name.substring(0, 47) + '...';
+                    
+                    // Extract price
+                    let price = "Price N/A";
+                    const priceMatch = container.innerText.match(/[₹]\s*([0-9,]+)/);
+                    if (priceMatch) price = `₹${priceMatch[1]}`;
+                    
+                    // Get image URL
+                    let imageUrl = imgEl.getAttribute('src') || imgEl.getAttribute('data-src');
+                    if (imageUrl) {
+                        if (imageUrl.startsWith('//')) imageUrl = 'https:' + imageUrl;
+                        else if (imageUrl.startsWith('/')) imageUrl = 'https://www.sheinindia.in' + imageUrl;
+                        imageUrl = imageUrl.replace(/_\d+x\d+/, '_500x750');
+                    }
+                    
+                    // Build full URL
+                    const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
+                    
+                    items.push({
+                        id,
+                        name,
+                        price,
+                        url,
+                        imageUrl
+                    });
+                } catch (e) {
+                    // Skip errors
+                }
             });
+            
             return items;
         });
         
-        console.log(`📦 Found ${products.length} products`);
+        console.log(`📦 Found ${products.length} products total`);
+        
+        if (products.length === 0) {
+            console.log('⚠️ No products found! Taking screenshot to debug...');
+            await page.screenshot({ path: 'debug-screenshot.jpg', fullPage: true });
+            
+            // Upload screenshot as artifact
+            fs.writeFileSync('debug-screenshot.jpg', await page.screenshot({ fullPage: true }));
+            console.log('✅ Screenshot saved for debugging');
+            return;
+        }
         
         const seen = loadSeenProducts();
         const newProducts = products.filter(p => p.id && !seen[p.id]);
         
-        console.log(`🎯 New products: ${newProducts.length}`);
+        console.log(`📊 Previously seen: ${Object.keys(seen).length} products`);
+        console.log(`🎯 New products found: ${newProducts.length}`);
         
         if (newProducts.length > 0) {
-            for (const product of newProducts.slice(0, 10)) {
+            console.log('📤 Sending Telegram alerts...');
+            
+            for (const product of newProducts.slice(0, 5)) {
+                console.log(`   Alerting: ${product.name}`);
                 await sendTelegramAlert(product);
                 seen[product.id] = Date.now();
                 await new Promise(r => setTimeout(r, 2000));
             }
+            
+            if (newProducts.length > 5) {
+                console.log(`   ... and ${newProducts.length - 5} more products`);
+                newProducts.slice(5).forEach(p => {
+                    seen[p.id] = Date.now();
+                });
+            }
+            
             saveSeenProducts(seen);
+        } else {
+            console.log('❌ No new products found');
         }
         
     } catch (error) {
         console.error('❌ Error:', error.message);
     } finally {
         if (browser) await browser.close();
-        console.log('🏁 Run completed');
+        console.log('🏁 Run completed at', new Date().toLocaleString());
     }
 }
 
