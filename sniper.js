@@ -5,28 +5,27 @@ const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Free proxy list - Updated frequently with working proxies
-const PROXY_LIST = [
-    'http://20.111.54.16:8123',
-    'http://47.88.32.48:8080', 
-    'http://103.152.112.120:80',
-    'http://20.204.212.25:3128',
-    'http://185.217.137.42:80',
-    'http://45.14.174.130:80',
-    'http://20.27.86.185:8080',
-    'http://51.89.255.67:80',
-    'http://20.199.81.189:3128',
-    'http://188.166.56.247:80',
-    'http://20.105.191.131:8181',
-    'http://20.116.91.72:3128',
-    'http://185.217.136.116:80',
-    'http://20.71.116.145:3128',
-    'http://20.111.54.16:8123'
+// Your Webshare proxies from the file
+const WEBSHARE_PROXIES = [
+    'http://vtlrnieh:3cl0gw8tlcsy@31.59.20.176:6754',
+    'http://vtlrnieh:3cl0gw8tlcsy@23.95.150.145:6114',
+    'http://vtlrnieh:3cl0gw8tlcsy@198.23.239.134:6540',
+    'http://vtlrnieh:3cl0gw8tlcsy@45.38.107.97:6014',
+    'http://vtlrnieh:3cl0gw8tlcsy@107.172.163.27:6543',
+    'http://vtlrnieh:3cl0gw8tlcsy@198.105.121.200:6462',
+    'http://vtlrnieh:3cl0gw8tlcsy@64.137.96.74:6641',
+    'http://vtlrnieh:3cl0gw8tlcsy@216.10.27.159:6837',
+    'http://vtlrnieh:3cl0gw8tlcsy@23.26.71.145:5628',
+    'http://vtlrnieh:3cl0gw8tlcsy@23.229.19.94:8689'
 ];
 
 // Rotate through proxies
-function getRandomProxy() {
-    return PROXY_LIST[Math.floor(Math.random() * PROXY_LIST.length)];
+let currentProxyIndex = 0;
+function getNextProxy() {
+    const proxy = WEBSHARE_PROXIES[currentProxyIndex];
+    currentProxyIndex = (currentProxyIndex + 1) % WEBSHARE_PROXIES.length;
+    console.log(`📡 Using proxy ${currentProxyIndex}/${WEBSHARE_PROXIES.length}`);
+    return proxy;
 }
 
 function loadSeenProducts() {
@@ -58,31 +57,34 @@ async function sendTelegramAlert(product) {
                 parse_mode: 'HTML'
             })
         });
-        console.log(`✅ Alert sent: ${product.name.substring(0, 30)}...`);
+        console.log(`✅ Alert sent`);
     } catch (error) {
         console.error('❌ Telegram failed:', error.message);
     }
 }
 
-async function tryWithProxy(proxy) {
-    console.log(`🔄 Trying proxy: ${proxy}`);
+async function scrapeWithProxy(proxy) {
+    console.log(`🔄 Trying proxy...`);
     
-    const browser = await puppeteer.launch({
-        headless: true,
-        executablePath: '/usr/bin/google-chrome-stable',
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-blink-features=AutomationControlled',
-            `--proxy-server=${proxy}`
-        ]
-    });
-
+    let browser;
     try {
+        browser = await puppeteer.launch({
+            headless: true,
+            executablePath: '/usr/bin/google-chrome-stable',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-web-security',
+                '--disable-features=IsolateOrigins,site-per-process',
+                `--proxy-server=${proxy}`
+            ]
+        });
+
         const page = await browser.newPage();
         
-        // Randomize viewport
+        // Randomize fingerprint
         await page.setViewport({
             width: 1920 + Math.floor(Math.random() * 100),
             height: 1080 + Math.floor(Math.random() * 100)
@@ -92,7 +94,8 @@ async function tryWithProxy(proxy) {
         const userAgents = [
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         ];
         await page.setUserAgent(userAgents[Math.floor(Math.random() * userAgents.length)]);
         
@@ -102,10 +105,13 @@ async function tryWithProxy(proxy) {
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"'
         });
         
-        console.log('📱 Loading page...');
+        console.log('📱 Loading SHEINVERSE page...');
         
         const response = await page.goto('https://www.sheinindia.in/c/sverse-5939-37961', {
             waitUntil: 'networkidle2',
@@ -114,66 +120,102 @@ async function tryWithProxy(proxy) {
         
         console.log(`📊 Response status: ${response.status()}`);
         
-        // Check page content
+        // Check if blocked
         const content = await page.content();
-        if (content.includes('Access Denied') || content.includes('blocked')) {
+        if (content.includes('Access Denied') || content.includes('blocked') || content.includes('captcha')) {
             console.log('❌ Blocked with this proxy');
             return false;
         }
         
-        console.log('✅ Success! Page loaded');
+        console.log('✅ Page loaded successfully');
         
-        // Wait for content
+        // Wait for content to load
         await new Promise(r => setTimeout(r, 5000));
         
         // Take screenshot
         const screenshot = await page.screenshot({ fullPage: true });
         fs.writeFileSync('debug-screenshot.jpg', screenshot);
+        console.log('📸 Screenshot saved');
         
         // Save HTML
         const html = await page.content();
         fs.writeFileSync('debug-page.html', html);
-        
-        console.log('✅ Debug files saved');
+        console.log('📄 HTML saved');
         
         // Extract products
         const products = await page.evaluate(() => {
             const items = [];
             const productSelectors = [
                 '.S-product-item',
-                '.product-card',
+                '.product-card', 
                 '.c-product-item',
                 '[data-spm="product"]',
-                '.product-list-item'
+                '.product-list-item',
+                '.goods-item',
+                '[class*="product"]'
             ];
             
             let productElements = [];
             for (const selector of productSelectors) {
                 const found = document.querySelectorAll(selector);
                 if (found.length > 0) {
+                    console.log(`Found ${found.length} with selector: ${selector}`);
                     productElements = found;
                     break;
                 }
             }
             
-            productElements.forEach(el => {
-                const link = el.querySelector('a[href*="/p-"]');
-                if (!link) return;
-                
-                const href = link.getAttribute('href');
-                const id = href?.match(/-p-(\d+)/)?.[1] || href;
-                const img = el.querySelector('img');
-                const name = img?.getAttribute('alt') || 'Product';
-                const priceEl = el.querySelector('.price, [class*="price"]');
-                const price = priceEl ? priceEl.innerText : 'Price N/A';
-                
-                items.push({
-                    id,
-                    name: name.substring(0, 50),
-                    price,
-                    url: href.startsWith('http') ? href : `https://www.sheinindia.in${href}`,
-                    imageUrl: img?.src
+            if (productElements.length === 0) {
+                // Try finding any product links
+                const links = document.querySelectorAll('a[href*="/p-"]');
+                links.forEach(link => {
+                    const container = link.closest('div') || link.parentElement;
+                    if (container) productElements.push(container);
                 });
+            }
+            
+            productElements.forEach(el => {
+                try {
+                    const link = el.querySelector('a[href*="/p-"]');
+                    if (!link) return;
+                    
+                    const href = link.getAttribute('href');
+                    const id = href?.match(/-p-(\d+)/)?.[1] || href;
+                    const img = el.querySelector('img');
+                    if (!img) return;
+                    
+                    const name = img.getAttribute('alt') || 'Shein Product';
+                    
+                    // Find price
+                    let price = 'Price N/A';
+                    const priceEl = el.querySelector('.price, [class*="price"], .S-price, .product-price');
+                    if (priceEl) {
+                        price = priceEl.innerText;
+                    } else {
+                        const text = el.innerText;
+                        const match = text.match(/[₹]\s*([0-9,]+)/);
+                        if (match) price = `₹${match[1]}`;
+                    }
+                    
+                    // Get image URL
+                    let imageUrl = img.getAttribute('src') || img.getAttribute('data-src');
+                    if (imageUrl && imageUrl.startsWith('//')) {
+                        imageUrl = 'https:' + imageUrl;
+                    }
+                    
+                    // Build full URL
+                    const url = href.startsWith('http') ? href : `https://www.sheinindia.in${href}`;
+                    
+                    items.push({
+                        id,
+                        name: name.substring(0, 50),
+                        price,
+                        url,
+                        imageUrl
+                    });
+                } catch (e) {
+                    // Skip errors
+                }
             });
             
             return items;
@@ -185,8 +227,10 @@ async function tryWithProxy(proxy) {
             const seen = loadSeenProducts();
             const newProducts = products.filter(p => p.id && !seen[p.id]);
             
+            console.log(`📊 Previously seen: ${Object.keys(seen).length}`);
+            console.log(`🎯 New products: ${newProducts.length}`);
+            
             if (newProducts.length > 0) {
-                console.log(`🎯 New products: ${newProducts.length}`);
                 for (const product of newProducts.slice(0, 5)) {
                     await sendTelegramAlert(product);
                     seen[product.id] = Date.now();
@@ -194,32 +238,38 @@ async function tryWithProxy(proxy) {
                 }
                 saveSeenProducts(seen);
             }
+        } else {
+            console.log('⚠️ No products found in page');
         }
         
         return true;
         
+    } catch (error) {
+        console.log(`❌ Proxy failed: ${error.message}`);
+        return false;
     } finally {
-        await browser.close();
+        if (browser) await browser.close();
     }
 }
 
 async function runSniper() {
-    console.log('🚀 Starting sniper with proxy rotation...', new Date().toLocaleString());
+    console.log('🚀 Starting SHEINVERSE Sniper with Webshare proxies...', new Date().toLocaleString());
+    console.log(`📡 Loaded ${WEBSHARE_PROXIES.length} proxies`);
     
     // Try each proxy until one works
-    for (const proxy of PROXY_LIST) {
-        try {
-            const success = await tryWithProxy(proxy);
-            if (success) {
-                console.log('✅ Successfully scraped with proxy');
-                return;
-            }
-        } catch (error) {
-            console.log(`❌ Proxy failed: ${error.message}`);
+    for (let attempt = 0; attempt < WEBSHARE_PROXIES.length; attempt++) {
+        const proxy = getNextProxy();
+        console.log(`\n📡 Attempt ${attempt + 1}/${WEBSHARE_PROXIES.length}`);
+        
+        const success = await scrapeWithProxy(proxy);
+        if (success) {
+            console.log('✅ Successfully scraped!');
+            return;
         }
         
-        // Wait before trying next proxy
-        await new Promise(r => setTimeout(r, 2000));
+        // Wait before next attempt
+        console.log('⏳ Waiting 5 seconds before next proxy...');
+        await new Promise(r => setTimeout(r, 5000));
     }
     
     console.log('❌ All proxies failed');
