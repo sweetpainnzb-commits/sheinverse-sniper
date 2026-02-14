@@ -45,9 +45,9 @@ function loadSeenProducts() {
             const seen = JSON.parse(data);
             console.log(`📂 Loaded ${Object.keys(seen).length} previously seen products`);
             return seen;
-        } catch (e) {
-            console.log('❌ Error loading seen products:', e.message);
         }
+    } catch (e) {
+        console.log('❌ Error loading seen products:', e.message);
     }
     console.log('📂 No seen_products.json file found - first run');
     return {};
@@ -101,10 +101,9 @@ async function checkProductStockWithDebug(page, product, index) {
         // Check stock status
         const stockStatus = await page.evaluate(() => {
             const pageText = document.body.innerText?.toLowerCase() || '';
-            const pageHtml = document.body.innerHTML?.toLowerCase() || '';
             
             // Look for "Add to Bag" button
-            const buttons = Array.from(document.querySelectorAll('button, .btn, [class*="add"], [class*="bag"]'));
+            const buttons = Array.from(document.querySelectorAll('button'));
             let addButton = null;
             for (const btn of buttons) {
                 const text = (btn.innerText || '').toLowerCase();
@@ -143,7 +142,7 @@ async function checkProductStockWithDebug(page, product, index) {
                 reason = 'No clear stock indicators';
             }
             
-            return { inStock, reason, hasAddButton, isButtonDisabled };
+            return { inStock, reason };
         });
         
         console.log(`      📊 Result: ${stockStatus.inStock ? '✅ IN STOCK' : '❌ OUT OF STOCK'}`);
@@ -152,7 +151,7 @@ async function checkProductStockWithDebug(page, product, index) {
         return stockStatus.inStock;
         
     } catch (error) {
-        console.log(`      ❌ Error: ${error.message}`);
+        console.log(`      ❌ Error checking stock: ${error.message}`);
         return false;
     }
 }
@@ -252,7 +251,9 @@ async function scrapeWithProxy(proxy) {
                         url,
                         imageUrl
                     });
-                } catch (e) {}
+                } catch (e) {
+                    // Skip errors
+                }
             });
             
             return items;
@@ -270,22 +271,13 @@ async function scrapeWithProxy(proxy) {
                 console.log(`📸 Will save screenshots & HTML with product codes\n`);
                 
                 const productsToCheck = newProducts.slice(0, 5);
-                const savedFiles = [];
                 
                 for (let i = 0; i < productsToCheck.length; i++) {
-                    const product = productsToCheck[i];
-                    const safeId = getSafeFilename(product.id);
-                    
-                    await checkProductStockWithDebug(page, product, i);
-                    
-                    // Track saved files
-                    savedFiles.push(`product_${i+1}_${safeId}.jpg`);
-                    savedFiles.push(`product_${i+1}_${safeId}.html`);
+                    await checkProductStockWithDebug(page, productsToCheck[i], i);
                 }
                 
-                // Save a list of all generated files
-                fs.writeFileSync('generated_files.txt', savedFiles.join('\n'));
-                console.log(`📋 Saved list of generated files`);
+                console.log(`\n✅ Debug files saved for first 5 products`);
+                console.log(`📁 Check artifacts for files named product_1_*.jpg, product_1_*.html, etc.`);
                 
             } else {
                 console.log('❌ No new products found to check');
@@ -316,13 +308,17 @@ async function runSniper() {
         const success = await scrapeWithProxy(proxy);
         if (success) {
             console.log('✅ Debug run completed!');
-            console.log('📁 Check artifacts for the following files:');
-            console.log('   - product_1_*.jpg and .html');
-            console.log('   - product_2_*.jpg and .html');
-            console.log('   - product_3_*.jpg and .html');
-            console.log('   - product_4_*.jpg and .html');
-            console.log('   - product_5_*.jpg and .html');
-            console.log('   - generated_files.txt');
+            console.log('\n📁 Artifacts should contain:');
+            console.log('   - product_1_*.jpg');
+            console.log('   - product_1_*.html');
+            console.log('   - product_2_*.jpg');
+            console.log('   - product_2_*.html');
+            console.log('   - product_3_*.jpg');
+            console.log('   - product_3_*.html');
+            console.log('   - product_4_*.jpg');
+            console.log('   - product_4_*.html');
+            console.log('   - product_5_*.jpg');
+            console.log('   - product_5_*.html');
             return;
         }
         
