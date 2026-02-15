@@ -1,6 +1,6 @@
 /**
  * 🚀 SHEINVERSE SNIPER - API ONLY (NO SCRAPING)
- * Uses exact headers from successful phone request
+ * Fixed: Proper proxy authentication for Puppeteer
  */
 
 const fetch = require('node-fetch');
@@ -10,7 +10,7 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID || "-1003320038050";
-const PROXY_URL = process.env.PROXY_URL || null; // REQUIRED for this to work
+const PROXY_URL = process.env.PROXY_URL || null; // Format: http://username:password@host:port
 
 const SEEN_FILE = 'seen_products.json';
 const COOKIES_FILE = 'cookies.json';
@@ -21,7 +21,7 @@ const CATEGORY_PAGE = 'https://www.sheinindia.in/c/sverse-5939-37961';
 const API_PARAMS = {
     fields: 'SITE',
     currentPage: '1',
-    pageSize: '40',  // Using 40 like your phone request
+    pageSize: '40',
     format: 'json',
     query: ':relevance',
     gridColumns: '2',
@@ -83,10 +83,31 @@ function saveCookies(cookies) {
     }
 }
 
+function parseProxyUrl(proxyUrl) {
+    if (!proxyUrl) return null;
+    
+    try {
+        const url = new URL(proxyUrl);
+        return {
+            host: url.hostname,
+            port: url.port,
+            username: url.username,
+            password: url.password,
+            fullUrl: proxyUrl
+        };
+    } catch (e) {
+        console.error('❌ Invalid proxy URL format:', e.message);
+        return null;
+    }
+}
+
 async function getFreshCookies() {
     console.log('🍪 Getting fresh cookies with Puppeteer...');
-    if (PROXY_URL) {
-        console.log('🔒 Using proxy for browser');
+    
+    const proxyInfo = parseProxyUrl(PROXY_URL);
+    
+    if (proxyInfo) {
+        console.log(`🔒 Using proxy: ${proxyInfo.host}:${proxyInfo.port}`);
     } else {
         console.log('⚠️ WARNING: No proxy - API will likely be blocked');
         console.log('💡 Set PROXY_URL environment variable');
@@ -105,12 +126,22 @@ async function getFreshCookies() {
             ]
         };
         
-        if (PROXY_URL) {
-            launchOptions.args.push(`--proxy-server=${PROXY_URL}`);
+        // Add proxy server WITHOUT authentication (Puppeteer handles auth separately)
+        if (proxyInfo) {
+            launchOptions.args.push(`--proxy-server=${proxyInfo.host}:${proxyInfo.port}`);
         }
         
         browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
+        
+        // Authenticate proxy if credentials exist
+        if (proxyInfo && proxyInfo.username && proxyInfo.password) {
+            await page.authenticate({
+                username: proxyInfo.username,
+                password: proxyInfo.password
+            });
+            console.log('✅ Proxy authenticated');
+        }
         
         // Mobile user agent like your phone
         await page.setUserAgent('Mozilla/5.0 (Linux; Android 13; sdk_gphone64_x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Mobile Safari/537.36');
@@ -285,7 +316,10 @@ async function runSniper() {
         return;
     }
     
-    console.log(`🔒 Proxy: ${PROXY_URL.replace(/\/\/.*:.*@/, '//***:***@')}\n`);
+    const proxyInfo = parseProxyUrl(PROXY_URL);
+    if (proxyInfo) {
+        console.log(`🔒 Proxy: ${proxyInfo.username}:***@${proxyInfo.host}:${proxyInfo.port}\n`);
+    }
     
     // Get fresh cookies
     let cookies = loadCookies();
@@ -314,7 +348,7 @@ async function runSniper() {
         console.log('');
         console.log('💡 Troubleshooting:');
         console.log('1. Check if proxy is working');
-        console.log('2. Try a different proxy provider');
+        console.log('2. Try a different proxy from your list');
         console.log('3. Proxy might need to be from India region');
         return;
     }
