@@ -1,5 +1,6 @@
 /**
- * 🚀 SHEINVERSE SNIPER - REAL API VERSION WITH COOKIES
+ * 🚀 SHEINVERSE SNIPER - PUBLIC API VERSION
+ * Uses public endpoints that don't need cookies
  */
 
 import fetch from 'node-fetch';
@@ -10,8 +11,13 @@ const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Men's SHEINVERSE API URL
-const API_URL = 'https://www.sheinindia.in/api/category/sverse-5939-37961';
+// Try different API endpoints (public)
+const API_ENDPOINTS = [
+    'https://www.sheinindia.in/api/category/sverse-5939-37961',
+    'https://www.sheinindia.in/api/category/sverse-5939-37961/products',
+    'https://www.sheinindia.in/api/products/list',
+    'https://www.sheinindia.in/api/search'
+];
 
 const API_PARAMS = {
     fields: 'SITE',
@@ -20,27 +26,15 @@ const API_PARAMS = {
     format: 'json',
     query: ':relevance',
     gridColumns: '2',
-    advfilter: 'true',
-    platform: 'Desktop',
-    showAdsOnNextPage: 'false',
-    is_ads_enable_plp: 'true',
-    displayRatings: 'true',
-    segmentIds: '',
     store: 'shein'
 };
-
-// CRITICAL: Cookies from your captured request
-const COOKIES = 'bm_ss=ab8e18ef4e; bm_mi=96D3B43757CAF528C369E1D30A9CCF4E~YAAQBGo3F1EgmyGcAQAACmWKYB50f8oChMVrVikFIU42RU/Hdyrh/dE1QhydzERXp8mKuhomhrk6zE5G8Lqt0HbaUHcA48m2MZCtKumauXzwWOn5E73OWYYhrcpqUGDYBcR/ygSxAXMQ2PFA2q/YqsOCeEqY4Ffr4o247TQ0TL+u3JoVF1KaBvxOiZOhRybRriGaKG0x+LqNORbj30sZLH3WPo3wkNiR2WR1FW9ZvPdmlddZj1X/AWEDFQDQlw/Jg2P3R0M86g4Jnm77IFmOZWvkAc/4ZEM7RcrLnvwjs401cp8wPwxv/EXSME/feEnsOO+3Di+2t0hfxq0=~1; ak_bmsc=C908FDFD70E7865B64BB6A45A9475BE9~000000000000000000000000000000~YAAQBmo3FwvcaU+cAQAAJXqKYB40+oHjDaI51kxQVO4amYcdSdMDTLscTQaASJJbzU6+uPYPUHyl+toVL6nTvYGNeTOu4SKWou9uG7/hO7JUcomH/U9DFtufFCdBEKN58KtxlalO2Lffo//B598nG0Wj+gmVkIq7BxkhVV9zJ1Wa8e/GAv+guHbYldNVxgsbQl0iojZ+9YqY4dbV/aPOXDlunzBtfFTh+2toessZfa71QdJlNEDJSHjzu3g1kgGcU4nlEJKf/kk65ITnKOADAW5pFKBfsoV+dwB6678ifJX4K8Hhawsdy0zk5t9/KUI+1ldZkQ1VX1SA/nM6okjREP9eQ/xrNG/aojd1p69SxynY23heb6CG0uHcai47O3nkneuKI8VcuQQlP1aKvi2xXBcrBCStsu92/YLLYqEKAcBk62CSzfesbFzzEl6zlb14j8k+a+wjw25Yv2nRgBU5; _gid=GA1.2.1834522386.1771146224; _gac_G-D6SVDYBNVW=1.1771146223.EAIaIQobChMItZm8mZHbkgMVu6NmAh2KHwGDEAAYASAAEgJM_fD_BwE; WZRK_G=68bc1bf75e6249199e26698fc552835a; perf=true; navigation_cookie=false; V=1; _fbp=fb.1.1771146229180.7903128739525245; _fpuuid=6wtAt9RcQnWBPk9x9kwWo; deviceId=6wtAt9RcQnWBPk9x9kwWo; _gcl_au=1.1.814015120.1771146230; os=3; vr=WEB-2.0.11; ifa=96f4366f-68df-4b05-b838-f1679ae30bf1; jioAdsFeatureVariant=true; _gcl_aw=GCL.1771146245.EAIaIQobChMItZm8mZHbkgMVu6NmAh2KHwGDEAAYASAAEgJM_fD_BwE; _gcl_gs=2.1.k1$i1771146212$u63390829; storeTypes=shein; A=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJjbGllbnQiLCJjbGllbnROYW1lIjoid2ViX2NsaWVudCIsInJvbGVzIjpbeyJuYW1lIjoiUk9MRV9UUlVTVEVEX0NMSUVOVCJ9XSwidGVuYW50SWQiOiJTSEVJTiIsImV4cCI6MTc3MTIyMzQwMSwiaWF0IjoxNzY4NjMxNDAxfQ.FY9vPRBvSpafwFhVi8mOfNxICabvtuqI7C5akYNRNfJrJ4z3GOaL_-tCoFD_PTpD_oZft9vBaJDbOZmar5JDAZShLf5V_WAaxRI5BLaLEHg-n_OHw-9tIrleSagDe4f5uUg1BDXMwbLfceb5p9cPLwCtREeXNU1lW2dzh3EiW6VjhnzvR64oqDJpufPpqr2S_3YUhgDpJ5QgaXG_86O0dJd8jzwL_ZpKH4E9-tKgp4xdTlBB6tPAQeq1i7tFT1-FxRQw5Hib7L74hm5tCvj6qrXpXxZbmu2jln6-uGvF7lb0Ssbf-L_OFJVkNcNHiLkjuLs8JIk3qW_GJIpy3h0H4w; U=anonymous; AGUID=b87f5cad-1390-44ea-b51f-9113814d1495; C=b87f5cad-1390-44ea-b51f-9113814d1495; M=b87f5cad-1390-44ea-b51f-9113814d1495; _abck=9EE1FB45AFB77551220DA48DDBBA8A1D~0~YAAQBmo3F/8wak+cAQAAmHGRYA8i/ww8GgjuQ3j8wTWqGfrQPVnSgUytHteBuq2DlM+GqcFc3S4qaDD+gaV6tnkcGDcrjw5w9vCdHOBf/gGfVywI+EE2+uq5BVn4KMoJRvGvhtQy2dhi4XB8e+4EYXPZhMiz7FSe/mN6enECjfhYCY6m1VIyTGU3elgXSfu8PkDJhvn72/puW29YKCDTPOg/dEizefOnLN/QPpG1m95BglYLcm2nIEObJwCFy28rImFit0qmJsfuA996ib7F7QIO9MpKbfGgjY75xP0Sw2NiYRWVRXaoesrojvYcH2A8Rep3tZWb2oT7h7BHXQXwUGV2M0zR7Qi7h0xeARNGuoHzVsyfAI5IRtaCsRIBFN6iAYc1/k4vNfS1GgVPWCUc3OggAyEcq+YHcrcGGjY5gfEVkxqWbwC9ysY2oXXHPYoTr/4BXNQKzq28emQK0laz0iqil+LUvH9pqbGsUt5IpyQ2JlFhKd08ld248ZmnNodDG7wPErkQBY1Wb+nwadaTASyDxkZc96qOsrKFJQD1TQ5s7Eu440FTNltIOYbNJazLr9YxYVv9eFeCggR1Agqw/8j0WaA3w9g+LvpTgP6b+TaUixkuTo6jdFEd0WR3U06XImUh+hnxqVPX0YxUBNUd5r7qPxylvJoo+Qjvbp41HVBbdCM3/8KfpDh00Mf3IWBxpzNWaPOI2s00qehcS0C6ak0p045h6QTBBx95pXIvm61qUGWhcoBg2yrg0wc1lscUv0IJGC1cp7IgbFIMsFZGhYny1Zim3ylVR6Qtn2+6vq42j1DxwSha25qts5MxWsesb+7psZm6KPrp8/+79HXq8bq654wiuiGjHCm7a83WnJvBEB5kGKQMkldfZ5RjE6t9jBnfeWa4qwcCkKbw5LuVtsg=~-1~-1~1771149810~AAQAAAAF%2f%2f%2f%2f%2fxz5G%2fosAalFOzsatQvWYby2dT64Orp2RorLmDYVb0AZHrJYKV9Jwql%2ftCCMnVr6i22VNQe19pjj72pD3BxmwcfozpkaVpSR7LXU~-1; bookingType=SHEIN; sessionId=sess_1771147528678_k35brir2z; mobilePLPScrollPosition=0; recentlyViewed=[{"id":"443392720_silver","store":0},{"id":"443388755_black","store":0},{"id":"443336864_multi","store":0},{"id":"443383011_grey","store":0},{"id":"443388591_beige","store":0}]; WZRK_S_8WR-85Z-WR7Z=%7B%22p%22%3A9%2C%22s%22%3A1771146219%2C%22t%22%3A1771147562%7D; bm_s=YAAQbyUPF2TbbR+cAQAA+RehYATOVV9f2GgTRmA+FtcBLv1igkRUskVqSvel6G0QmJ4OL8/rNRmHsGN4WHRHZCJQ5yo2DhntF+2D9AdKxckfK68yl4Z+7fHyHmGMbk8FsgANbGOzZHptlpFufk/3royy4z6RV96eHKl6qEfgrI40LcY5nsFrWaveLToAk5BVn2O5zu+vOGjzjLOvreXWNmjkQp3GxNRS655qVdZmEgsjedqzHOhopON0r3lA/21Lqa0Bj9v83pXRo8XRjdG8sJYb3wOrrRZhcfkp5SLt2gWQqwYuYdBrYGYSXkWi3aK8OFXcT721g7TAw7P/UX+sTs3OrhhVGyR45TfwEvkeZoawnuzCarkhGPqtmaDowVBA1tW7YAE5Z6TejT61eKD0E7bQDXoVCM78CJz3o1xTJ5y+0wYlAvAWJkTVIcOarks6oJA3FBItDB8Wo5QqaLpQLBZhwbJPUZTPD0wms+4IBKXpQlQRCEMQJMVdCTtOUzEUgSybg7/blYAvb+Z2YyVb4PE7Wo14WKDgG4C5fFLvuG5IwQg51xN8sMoGlnEj7aWIMrqABA7A3tE4146CLZI2lF4B; bm_so=12C39C9C0289F40E928F85A1BCABC1C01E167F86EC69170A9BD7EDCF6B13174F~YAAQbyUPF2XbbR+cAQAA+RehYAYNlAIwRlZTC/UHowb7arS3NMBphZ8FkeQD5b5n+txzmq4Z/T+6BUdwsuUGIeUlG+ciKtEGq/7WV2BEP1PlxM8691GPKK9WespT0t+1tukFv5SEwUqFTUOxeplR+Kc7zAGk8mqrFhLM0PXHDwAvNG8WJujTXLYIDbRQ3qxMonl7ji4j75HIizIYu7uJEtLc3mmInPBRGcxpX4DV1WoClAEXH1pR0WbzlYN5BZZiDUYGM69T5DJc/DuTm0nAqyck/MwctYIZkrkw2xEXD0KOTKyhsegMJ6E9nDXid4A6B+ideuqKsqshcob1gklgeKLK8kfb3kpDXiLWAOyL+Hs9TZRaInolwq+7uvjHcsCNjPch+GkHtmzEPl2b5so+uRTPQ6wZEn5g7rmMjd6MxHDptLEPmr64BOZN1NtKDdjB3FCavmYUbxS9jPud+v9p7GI=; bm_sz=E36D1543D7F68C1707778F2BFEDF3FCE~YAAQbyUPF2fbbR+cAQAA+RehYB5g7zblecxaVQzhs0bhRBt/qCIefVNoxyH9MDR/5Zuuitcogc0OT6CLhN08PO8UHU/XjhBd6xO6TN7a87MHTkCzxukBBgDR1iM1g9DKmnrehLkza5b6LcVyzJ3CANV83o+YQVUAFleIaOqImCVnFWP/pQFdBMc2tCL1c89D3OSFAmjDqBfqni4ceW3dBM2rfyka5qGiMbduz2CvyLa2+DtLU0slyUPVYvfRjKIjGKAUhdvGDNsuX2w+Bg0EcVYP2x+hallOCQzflrfwLbV0dhfJcGcoEDRLanyu8TO4eqA6QFbZydLC75CNwMxV1G2Olw/YiF8fjEbEkjTmTK+J/feuNuBo7iogngzPANGumjpAsgXZeYPAAT7JluaFnW830mR0qB5JkWf/T0VmYR3MZDDj6A/gD5/bd+XLIyHAQUV7qUS5+MqvQy3c/asmrczc3DAZK3uGH8Mf4bjmy+EfjMzu89/OsQwvG5MoJYzlZC6ILI6tNYZ5m8vD9KlNJE+ubUdSzlT1Tg==~3356229~4408626; bm_sv=B0DF2FC1413962A6A97663BDA18D9DB2~YAAQbyUPF0ncbR+cAQAAaCahYB7gr3LIhAjTbFGO8oXBqEDXM/bRV81NESYcDbXJswdN0JCjrAYYXV2dNOqSJL7YcMGZrtxtG/bU+xviZHZHaKvI/oK5V+Ll90hcDhV6/Hb1prZbFV25T7D0fWzfTu3fD/j3vKxEFKV/UkPkpbDq4l1nClHtyOQSKHfmy9+ypQr8EfMfFPC/cBFljwng3eSBZ8Xe5GRp1nz8+MWjz2P5zRWfmsvegGA8CINbUUVp/UmVmg==~1; _ga=GA1.1.345510162.1771146224; bm_lso=12C39C9C0289F40E928F85A1BCABC1C01E167F86EC69170A9BD7EDCF6B13174F~YAAQbyUPF2XbbR+cAQAA+RehYAYNlAIwRlZTC/UHowb7arS3NMBphZ8FkeQD5b5n+txzmq4Z/T+6BUdwsuUGIeUlG+ciKtEGq/7WV2BEP1PlxM8691GPKK9WespT0t+1tukFv5SEwUqFTUOxeplR+Kc7zAGk8mqrFhLM0PXHDwAvNG8WJujTXLYIDbRQ3qxMonl7ji4j75HIizIYu7uJEtLc3mmInPBRGcxpX4DV1WoClAEXH1pR0WbzlYN5BZZiDUYGM69T5DJc/DuTm0nAqyck/MwctYIZkrkw2xEXD0KOTKyhsegMJ6E9nDXid4A6B+ideuqKsqshcob1gklgeKLK8kfb3kpDXiLWAOyL+Hs9TZRaInolwq+7uvjHcsCNjPch+GkHtmzEPl2b5so+uRTPQ6wZEn5g7rmMjd6MxHDptLEPmr64BOZN1NtKDdjB3FCavmYUbxS9jPud+v9p7GI=~1771147709733; _ga_D6SVDYBNVW=GS2.1.s1771146230$o1$g1$t1771147716$j43$l0$h1660416475';
 
 const API_HEADERS = {
     'Accept': 'application/json',
     'Accept-Encoding': 'gzip, deflate, br',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Connection': 'keep-alive',
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; sdk_gphone64_x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Mobile Safari/537.36',
-    'X-TENANT-ID': 'SHEIN',
-    'Referer': 'https://www.sheinindia.in/c/sverse-5939-37961',
-    'Cookie': COOKIES  // Add the cookies here!
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'X-TENANT-ID': 'SHEIN'
 };
 
 function loadSeenProducts() {
@@ -79,6 +73,206 @@ async function sendTelegramAlert(product) {
             method: 'POST',
             body: formData
         });
+        
+        console.log(`   📤 Alert sent: ${product.name.substring(0, 40)}...`);
+    } catch (error) {
+        console.error(`   ❌ Telegram alert failed: ${error.message}`);
+        
+        // Fallback to text-only
+        try {
+            await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: TELEGRAM_CHAT_ID,
+                    text: caption,
+                    parse_mode: 'HTML'
+                })
+            });
+            console.log(`   📤 Text alert sent: ${product.name.substring(0, 40)}...`);
+        } catch (e) {}
+    }
+}
+
+async function fetchProducts() {
+    console.log('🔍 Trying different API endpoints...');
+    
+    // Try each endpoint until one works
+    for (const endpoint of API_ENDPOINTS) {
+        try {
+            console.log(`\n📡 Trying: ${endpoint}`);
+            
+            const url = new URL(endpoint);
+            Object.keys(API_PARAMS).forEach(key => {
+                url.searchParams.append(key, API_PARAMS[key]);
+            });
+            
+            const response = await fetch(url.toString(), {
+                method: 'GET',
+                headers: API_HEADERS
+            });
+            
+            console.log(`📊 Response status: ${response.status}`);
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Try to extract products from different response structures
+                let products = [];
+                
+                if (data.products && Array.isArray(data.products)) {
+                    products = data.products;
+                } else if (data.data && Array.isArray(data.data)) {
+                    products = data.data;
+                } else if (data.items && Array.isArray(data.items)) {
+                    products = data.items;
+                } else if (data.result && Array.isArray(data.result)) {
+                    products = data.result;
+                }
+                
+                if (products.length > 0) {
+                    console.log(`✅ Success! Found ${products.length} products`);
+                    
+                    return products.map(p => ({
+                        id: p.code || p.id || p.productId,
+                        name: (p.name || p.title || '').replace(/Shein\s*/i, '').trim(),
+                        price: p.offerPrice?.displayformattedValue || p.price?.displayformattedValue || p.price || 'N/A',
+                        url: p.url ? 'https://www.sheinindia.in' + p.url : `https://www.sheinindia.in/p/${p.code || p.id}`,
+                        imageUrl: p.images?.[0]?.url || p.image || '',
+                    }));
+                }
+            }
+        } catch (error) {
+            console.log(`❌ Failed: ${error.message}`);
+        }
+    }
+    
+    // If all API attempts fail, fall back to scraping the webpage
+    console.log('\n⚠️ All APIs failed, trying to scrape webpage...');
+    return await scrapeWebpage();
+}
+
+async function scrapeWebpage() {
+    try {
+        const response = await fetch('https://www.sheinindia.in/c/sverse-5939-37961', {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        
+        const html = await response.text();
+        
+        // Look for JSON data in the HTML (often in __PRELOADED_STATE__)
+        const preloadedStateMatch = html.match(/window\.__PRELOADED_STATE__\s*=\s*({.+?});/);
+        
+        if (preloadedStateMatch) {
+            try {
+                const data = JSON.parse(preloadedStateMatch[1]);
+                
+                // Extract products from various possible locations
+                let products = [];
+                
+                if (data.products?.products) {
+                    products = data.products.products;
+                } else if (data.products?.results) {
+                    const productIds = data.products.results;
+                    products = productIds.map(id => data.products.entities?.[id]).filter(Boolean);
+                } else if (data.grid?.entities) {
+                    products = Object.values(data.grid.entities);
+                }
+                
+                if (products.length > 0) {
+                    console.log(`✅ Extracted ${products.length} products from page data`);
+                    
+                    return products.map(p => ({
+                        id: p.code || p.id,
+                        name: (p.name || '').replace(/Shein\s*/i, '').trim(),
+                        price: p.offerPrice?.displayformattedValue || p.price?.displayformattedValue || 'N/A',
+                        url: p.url ? 'https://www.sheinindia.in' + p.url : `https://www.sheinindia.in/p/${p.code || p.id}`,
+                        imageUrl: p.images?.[0]?.url || p.imageUrl || '',
+                    }));
+                }
+            } catch (e) {
+                console.log('❌ Failed to parse preloaded state:', e.message);
+            }
+        }
+        
+        // Simple regex fallback
+        const productMatches = html.matchAll(/<a[^>]*href="([^"]*\/p\/[^"]*)"[^>]*>[\s\S]*?<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*>[\s\S]*?₹([0-9,]+)/g);
+        
+        const products = [];
+        for (const match of productMatches) {
+            products.push({
+                id: match[1].split('/p/')[1] || match[1],
+                name: match[2].replace(/Shein\s*/i, '').trim().substring(0, 50),
+                price: `₹${match[4]}`,
+                url: match[1].startsWith('http') ? match[1] : 'https://www.sheinindia.in' + match[1],
+                imageUrl: match[3].startsWith('http') ? match[3] : 'https:' + match[3],
+            });
+        }
+        
+        if (products.length > 0) {
+            console.log(`✅ Extracted ${products.length} products via regex`);
+            return products;
+        }
+        
+        return [];
+        
+    } catch (error) {
+        console.error('❌ Webpage scrape failed:', error.message);
+        return [];
+    }
+}
+
+async function runSniper() {
+    console.log('\n🚀 ========================================');
+    console.log('   SHEINVERSE SNIPER - PUBLIC VERSION');
+    console.log('   ========================================\n');
+    console.log(`📅 ${new Date().toLocaleString()}`);
+    
+    const allProducts = await fetchProducts();
+    
+    if (allProducts.length === 0) {
+        console.log('❌ No products found');
+        return;
+    }
+    
+    console.log(`\n📦 Total products found: ${allProducts.length}`);
+    
+    const seen = loadSeenProducts();
+    console.log(`📂 Previously seen: ${Object.keys(seen).length}`);
+    
+    const newProducts = allProducts.filter(p => p.id && !seen[p.id]);
+    console.log(`🆕 NEW products found: ${newProducts.length}`);
+    
+    if (newProducts.length > 0) {
+        console.log('\n📢 Sending alerts...\n');
+        
+        for (let i = 0; i < newProducts.length; i++) {
+            const product = newProducts[i];
+            console.log(`${i + 1}/${newProducts.length}: ${product.name.substring(0, 40)}... - ${product.price}`);
+            
+            await sendTelegramAlert(product);
+            seen[product.id] = Date.now();
+            
+            await new Promise(r => setTimeout(r, 1000));
+        }
+        
+        saveSeenProducts(seen);
+        console.log(`\n✅ Alerted ${newProducts.length} new products!`);
+        
+    } else {
+        console.log('\n😴 No new products this round');
+    }
+    
+    console.log('\n✅ Run complete!');
+    console.log('========================================\n');
+}
+
+runSniper().catch(error => {
+    console.error('💥 Fatal error:', error);
+    process.exit(1);
+});        });
         
         console.log(`   📤 Alert sent: ${product.name.substring(0, 40)}...`);
     } catch (error) {
