@@ -58,7 +58,7 @@ jobs:
           path: cookies.json
           retention-days: 1      
       - name: Run sniper
-        run: node sniper-enhanced.js
+        run: node sniper.js
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
