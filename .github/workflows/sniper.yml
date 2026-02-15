@@ -1,35 +1,37 @@
-name: Sheinverse Every Minute Sniper
+name: SHEINVERSE Sniper
 
 on:
   schedule:
-    # Every 1 minute!
-    - cron: '* * * * *'
-  workflow_dispatch:  # Manual trigger
+    - cron: '*/5 * * * *'  # Every 5 minutes
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   snipe:
     runs-on: ubuntu-latest
-    timeout-minutes: 2  # Kill if it takes too long
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      - name: Download previous seen products
+        uses: actions/download-artifact@v4
+        with:
+          name: seen-products
+          path: ./
+        continue-on-error: true
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
       
-      - name: Download previous seen products
-        uses: actions/download-artifact@v4
-        with:
-          name: seen-products
-        continue-on-error: true
+      - name: Install Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
       
       - name: Install dependencies
-        run: |
-          npm install node-fetch@3.3.0
-          npm install form-data
+        run: npm install
       
       - name: Run sniper
         run: node sniper.js
@@ -37,10 +39,10 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       
-      - name: Upload seen products
-        if: always()
+      - name: Save seen products
         uses: actions/upload-artifact@v4
         with:
           name: seen-products
           path: seen_products.json
           retention-days: 90
+          if-no-files-found: ignore
