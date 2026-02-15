@@ -1,27 +1,23 @@
 /**
  * 🚀 SHEINVERSE SNIPER - REAL API VERSION
- * 
  * Uses Shein India's actual category API
- * - 100% FREE forever
- * - Runs every 60 seconds
- * - No proxies needed (API doesn't block like website does)
- * - Gets all products instantly in JSON format
  */
 
-const fetch = require('node-fetch');
-const fs = require('fs');
+import fetch from 'node-fetch';
+import fs from 'fs';
+import FormData from 'form-data';
 
 const TELEGRAM_BOT_TOKEN = "8367734034:AAETSFcPiMTyTvzyP3slc75-ndfGMenXK5U";
 const TELEGRAM_CHAT_ID = "-1003320038050";
 const SEEN_FILE = 'seen_products.json';
 
-// Shein India Category API - Men's SHEINVERSE
+// Men's SHEINVERSE API URL
 const API_URL = 'https://www.sheinindia.in/api/category/sverse-5939-37961';
 
 const API_PARAMS = {
     fields: 'SITE',
     currentPage: '1',
-    pageSize: '100',  // Get up to 100 products per request
+    pageSize: '100',
     format: 'json',
     query: ':relevance',
     gridColumns: '2',
@@ -47,28 +43,29 @@ const API_HEADERS = {
 function loadSeenProducts() {
     try {
         if (fs.existsSync(SEEN_FILE)) {
-            return JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
+            const data = fs.readFileSync(SEEN_FILE, 'utf8');
+            return JSON.parse(data);
         }
     } catch (e) {
         console.log('⚠️ Error loading seen products:', e.message);
     }
+    console.log('📂 No seen_products.json file found - first run');
     return {};
 }
 
 function saveSeenProducts(seen) {
     try {
         fs.writeFileSync(SEEN_FILE, JSON.stringify(seen, null, 2));
-        console.log(`✅ Saved ${Object.keys(seen).length} products to tracking`);
+        console.log(`✅ Saved ${Object.keys(seen).length} products to seen_products.json`);
     } catch (e) {
         console.log('❌ Error saving:', e.message);
     }
 }
 
 async function sendTelegramAlert(product) {
-    const caption = `🆕 <b>${product.name}</b>\n💰 ${product.price} 🔥 NEW DROP\n🔗 <a href="${product.url}">VIEW NOW</a>`;
+    const caption = `🆕 <b>${product.name}</b>\n💰 ${product.price}\n🔗 <a href="${product.url}">VIEW PRODUCT</a>`;
     
     try {
-        const FormData = (await import('form-data')).default;
         const formData = new FormData();
         formData.append('chat_id', TELEGRAM_CHAT_ID);
         formData.append('photo', product.imageUrl);
@@ -83,14 +80,27 @@ async function sendTelegramAlert(product) {
         console.log(`   📤 Alert sent: ${product.name.substring(0, 40)}...`);
     } catch (error) {
         console.error(`   ❌ Telegram alert failed: ${error.message}`);
+        
+        // Fallback to text-only
+        try {
+            await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: TELEGRAM_CHAT_ID,
+                    text: caption,
+                    parse_mode: 'HTML'
+                })
+            });
+            console.log(`   📤 Text alert sent: ${product.name.substring(0, 40)}...`);
+        } catch (e) {}
     }
 }
 
-async function fetchSheinverseProducts() {
+async function fetchProducts() {
     console.log('🔍 Calling Shein API...');
     
     try {
-        // Build URL with query parameters
         const url = new URL(API_URL);
         Object.keys(API_PARAMS).forEach(key => {
             url.searchParams.append(key, API_PARAMS[key]);
@@ -107,21 +117,19 @@ async function fetchSheinverseProducts() {
         
         const data = await response.json();
         
-        // Extract products array
         if (!data.products || !Array.isArray(data.products)) {
             console.log('⚠️ Unexpected API response structure');
-            console.log('Response keys:', Object.keys(data));
             return [];
         }
         
         console.log(`✅ API returned ${data.products.length} products`);
+        
         if (data.pagination) {
             console.log(`📊 Total products in category: ${data.pagination.totalResults}`);
         }
         
-        // Transform API response to our format
         const products = data.products.map(p => ({
-            id: p.code,  // Product code (e.g., "443326049004")
+            id: p.code,
             name: (p.name || '').replace(/Shein\s*/i, '').trim(),
             price: p.offerPrice?.displayformattedValue || p.price?.displayformattedValue || 'N/A',
             priceValue: p.offerPrice?.value || p.price?.value || 0,
@@ -144,27 +152,22 @@ async function runSniper() {
     console.log('   SHEINVERSE API SNIPER - EVERY MINUTE');
     console.log('   ========================================\n');
     console.log(`📅 ${new Date().toLocaleString()}`);
-    console.log(`⚡ Using real Shein India API - 100% FREE!\n`);
     
-    // Step 1: Fetch products from API
-    const allProducts = await fetchSheinverseProducts();
+    const allProducts = await fetchProducts();
     
     if (allProducts.length === 0) {
         console.log('❌ No products found or API error');
         return;
     }
     
-    console.log(`📦 Fetched ${allProducts.length} products from API`);
+    console.log(`📦 Found ${allProducts.length} products in API response`);
     
-    // Step 2: Load seen products
     const seen = loadSeenProducts();
     console.log(`📂 Previously seen: ${Object.keys(seen).length}`);
     
-    // Step 3: Filter NEW products
     const newProducts = allProducts.filter(p => p.id && !seen[p.id]);
     console.log(`🆕 NEW products found: ${newProducts.length}`);
     
-    // Step 4: Alert for new products
     if (newProducts.length > 0) {
         console.log('\n📢 Sending alerts...\n');
         
@@ -172,13 +175,9 @@ async function runSniper() {
             const product = newProducts[i];
             console.log(`${i + 1}/${newProducts.length}: ${product.name.substring(0, 40)}... - ${product.price}`);
             
-            // Send Telegram alert
             await sendTelegramAlert(product);
-            
-            // Mark as seen
             seen[product.id] = Date.now();
             
-            // Small delay between alerts
             await new Promise(r => setTimeout(r, 1000));
         }
         
@@ -186,12 +185,6 @@ async function runSniper() {
         console.log(`\n✅ Alerted ${newProducts.length} new products!`);
         
     } else {
-        // Mark all as seen (even if no new products)
-        allProducts.forEach(p => {
-            if (!seen[p.id]) seen[p.id] = Date.now();
-        });
-        saveSeenProducts(seen);
-        
         console.log('\n😴 No new products this round');
     }
     
@@ -199,7 +192,18 @@ async function runSniper() {
     console.log('========================================\n');
 }
 
-runSniper().catch(error => {
-    console.error('💥 Fatal error:', error);
-    process.exit(1);
-});
+// Check for first run
+if (process.env.FIRST_RUN === 'true') {
+    console.log('🎯 FIRST RUN MODE - Marking all products as seen...');
+    fetchProducts().then(products => {
+        const seen = {};
+        products.forEach(p => seen[p.id] = Date.now());
+        saveSeenProducts(seen);
+        console.log(`✅ Initialized with ${Object.keys(seen).length} products`);
+    }).catch(console.error);
+} else {
+    runSniper().catch(error => {
+        console.error('💥 Fatal error:', error);
+        process.exit(1);
+    });
+}
