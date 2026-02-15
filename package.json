@@ -1,16 +1,15 @@
 {
   "name": "sheinverse-sniper",
   "version": "1.0.0",
-  "description": "24/7 SHEINVERSE sniper with auto cookie refresh",
+  "description": "SHEINVERSE product sniper",
   "main": "sniper.js",
   "scripts": {
-    "start": "node sniper.js",
-    "first-run": "FIRST_RUN=true node sniper.js"
+    "start": "node sniper.js"
   },
   "dependencies": {
+    "puppeteer": "^21.0.0",
     "node-fetch": "^3.3.0",
-    "form-data": "^4.0.0",
-    "https-proxy-agent": "^7.0.0"
+    "form-data": "^4.0.0"
   },
   "type": "module"
 }
