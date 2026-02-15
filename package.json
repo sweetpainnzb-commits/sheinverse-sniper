@@ -1,0 +1,20 @@
+{
+  "name": "sheinverse-sniper",
+  "version": "1.0.0",
+  "description": "SHEINVERSE API Sniper - Runs every 60 seconds on GitHub Actions",
+  "main": "sniper-api-free.js",
+  "scripts": {
+    "start": "node sniper-api-free.js"
+  },
+  "keywords": [
+    "shein",
+    "sniper",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "node-fetch": "^3.3.0",
+    "form-data": "^4.0.0"
+  }
+}
