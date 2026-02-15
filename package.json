@@ -1,0 +1,13 @@
+{
+  "name": "sheinverse-sniper",
+  "version": "1.0.0",
+  "description": "SHEINVERSE API Sniper - Every 60 seconds",
+  "main": "sniper.js",
+  "scripts": {
+    "start": "node sniper.js"
+  },
+  "dependencies": {
+    "node-fetch": "2.7.0",
+    "form-data": "4.0.0"
+  }
+}
