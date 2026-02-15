@@ -36,7 +36,7 @@ jobs:
         run: npm install --prefer-offline --no-audit
       
       - name: Run sniper
-        run: node sniper.js
+        run: node sniper-enhanced.js
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
