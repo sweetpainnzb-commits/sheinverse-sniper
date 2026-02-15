@@ -2,7 +2,7 @@ name: Sheinverse API Sniper
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Every 15 minutes (changed from every 1 min to avoid rate limits)
+    - cron: '*/15 * * * *'  # Every 15 minutes
   workflow_dispatch:  # Manual trigger
 
 jobs:
@@ -40,28 +40,6 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           PROXY_URL: ${{ secrets.PROXY_URL }}
-        timeout-minutes: 3
-      
-      - name: Upload seen products
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: seen-products
-          path: seen_products.json
-          retention-days: 90
-      
-      - name: Upload cached cookies
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cached-cookies
-          path: cookies.json
-          retention-days: 1      
-      - name: Run sniper
-        run: node sniper.js
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         timeout-minutes: 3
       
       - name: Upload seen products
